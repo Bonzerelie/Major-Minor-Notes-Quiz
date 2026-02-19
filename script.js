@@ -106,9 +106,12 @@ function postHeightToParent(height) {
 
   window.parent.postMessage(
     {
+      // Squarespace parent listener expects this key:
+      iframeHeight: Math.max(0, Math.round(height)),
+  
+      // Keep these for compatibility with other listeners:
       type: "triads:height",
       height: Math.max(0, Math.round(height)),
-      // helpful if parent has multiple iframes using the same handler
       frameId: document.documentElement.getAttribute("data-frame-id") || null,
     },
     TARGET_ORIGIN
