@@ -45,6 +45,11 @@ body{
   max-width: var(--text-max);
   margin: 0 auto 10px;
 }
+
+.heroTitle{ display:block; margin: 10px auto 6px; }
+.heroTitleImg{ display:block; width:min(80%); height:auto; margin: 0 auto; }
+.questionsBadge{ display:block; height: 50px; width:auto; padding-bottom: 10px;}
+
 .app-title{
   margin: 14px 0 4px;
   font-size: 46px;
@@ -136,16 +141,6 @@ button:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
   border-radius: 16px;
   padding: 12px 12px 14px;
 }
-.kbdHeader{
-  display:flex;
-  justify-content:space-between;
-  gap: 10px;
-  flex-wrap:wrap;
-  align-items:baseline;
-  margin-bottom: 8px;
-}
-.kbdTitle{ font-weight: 900; opacity:.9; }
-.kbdHint{ font-size: 12px; opacity:.7; font-weight: 800; }
 
 .mount{ overflow:hidden; }
 .mount svg{ display:block; margin: 0 auto; width: 100%; height:auto; }
@@ -163,36 +158,41 @@ button:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
   margin: 12px auto 0;
 }
 .quizHeaderRow{
-  display:flex;
-  justify-content:space-between;
+  display:grid;
+  grid-template-columns: 1fr auto 1fr;
   gap: 10px;
-  flex-wrap:wrap;
   align-items:baseline;
   margin: 10px 2px 8px;
 }
 .quizTitle{
+  grid-column: 2;
+  justify-self:center;
   font-weight: 900;
   font-size: 18px;
 }
 .quizMeta{
+  grid-column: 3;
+  justify-self:end;
   font-weight: 800;
   opacity:.7;
   font-size: 12px;
 }
+
 
 .questionsList{
   margin: 0;
   padding: 0;
   list-style: none;
   display:grid;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .qCard{
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 12px;
+  padding: 14px;
   box-shadow: 0 6px 16px var(--shadow);
 }
 .qTop{
@@ -210,9 +210,9 @@ button:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
 }
 
 .qGrid{
-  margin-top: 10px;
+  margin-top: 12px;
   display:grid;
-  grid-template-columns: repeat(3, minmax(0,1fr));
+  grid-template-columns: repeat(3, minmax(84px, 1fr));
   gap: 10px;
 }
 .qField label{
@@ -225,13 +225,13 @@ button:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
 .qField select{ width:100%; }
 
 .qFeedback{
-  margin-top: 10px;
+  margin-top: 12px;
   display:grid;
   gap: 10px;
 }
 .qFeedbackRow{
   display:grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 .miniKbdBlock{
@@ -370,7 +370,7 @@ button:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
   width: 794px;                 /* ~A4 at 96dpi */
   min-height: 1123px;           /* ~A4 at 96dpi */
   margin: 0 auto;
-  padding: 28px;
+  padding: 0px 28px 28px;
   background:#fff;
   box-sizing: border-box;
   page-break-after: always;
@@ -380,7 +380,7 @@ button:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
 .sheetTitle{
   font-size: 22px;
   font-weight: 900;
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   text-align:center;
 }
 .sheetMeta{
@@ -390,59 +390,84 @@ button:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
   text-align:center;
   margin: 0 0 16px;
 }
+
+.sheetTitleImage{
+  display:block;
+  width:min(100%);
+  height:auto;
+  margin: 0 auto 2px;
+}
+
 .sheetList{
   margin: 0;
   padding: 0;
   list-style: none;
   display:grid;
-  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 12px;
+  row-gap: 10px;
 }
 .sheetQ{
   border: 1px solid rgba(0,0,0,.15);
   border-radius: 12px;
-  padding: 10px;
+  padding: 7px;
   break-inside: avoid;
 }
 .sheetQName{
   font-weight: 900;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 1.15;
 }
 .sheetLineRow{
   display:grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
 }
 .sheetLine{
   border: 1px solid rgba(0,0,0,.18);
   border-radius: 10px;
-  padding: 8px 10px 10px;
+  padding: 6px 8px;
   font-weight: 900;
-  font-size: 12px;
-  min-height: 44px;
+  font-size: 10px;
+  line-height: 1.1;
+  min-height: 22px;
   display:flex;
   align-items:flex-end;
-  justify-content:space-between;
+  justify-content:flex-start;
+  gap: 6px;
+  min-width: 0;
 }
 .dots{
-  margin-left: 10px;
-  flex: 1;
-  text-align:right;
-  letter-spacing: 2px;
-  opacity:.7;
+  margin-left: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  letter-spacing: .45px;
+  opacity: .7;
   position: relative;
-  top: 2px;
+  top: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
 }
+
 @media (max-width: 920px){
   .app-title{ font-size: 38px; }
   .app-subtitle-large{ font-size: 24px; }
-  .qGrid{ grid-template-columns: 1fr; }
-  .qFeedbackRow{ grid-template-columns: 1fr; }
+  .questionsList{ grid-template-columns: 1fr; }
   .topKeyboardMount{ min-height: 150px; }
   .beginOptionRow{ grid-template-columns: 1fr; }
   .beginAdvice{ text-align:left; }
+  .quizHeaderRow{ grid-template-columns: 1fr; }
+  .quizTitle{ grid-column: 1; justify-self:center; }
+  .quizMeta{ grid-column: 1; justify-self:center; }
+}
+
+@media (max-width: 520px){
+  .qGrid{ grid-template-columns: 1fr; }
 }
 
 @media (max-width: 420px){
   button{ padding: 0 12px; }
-  .kbdHeader{ gap: 6px; }
 }

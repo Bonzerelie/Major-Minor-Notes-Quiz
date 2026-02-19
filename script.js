@@ -22,7 +22,7 @@
   const MINI_KBD_OCTAVES = 3;
 
   // PDF margins (pt)
-  const PDF_MARGIN_PT = 28;
+  const PDF_MARGIN_PT = 18;
 
   const PC_TO_STEM = {
     0: "c",
@@ -95,6 +95,66 @@
 
   const bufferPromiseCache = new Map();
   const activeVoices = new Set();
+
+  // --- Iframe height reporting (postMessage) ---
+function postHeightToParent(height) {
+  // If not embedded, do nothing.
+  if (window.parent === window) return;
+
+  // Safer if you set this to your parent origin, e.g. "https://example.com"
+  const TARGET_ORIGIN = "*";
+
+  window.parent.postMessage(
+    {
+      type: "triads:height",
+      height: Math.max(0, Math.round(height)),
+      // helpful if parent has multiple iframes using the same handler
+      frameId: document.documentElement.getAttribute("data-frame-id") || null,
+    },
+    TARGET_ORIGIN
+  );
+}
+
+function measureDocHeightPx() {
+  // Measure the actual rendered document height (works well with modals/results expanding)
+  const de = document.documentElement;
+  const body = document.body;
+
+  return Math.max(
+    body?.scrollHeight ?? 0,
+    body?.offsetHeight ?? 0,
+    de?.clientHeight ?? 0,
+    de?.scrollHeight ?? 0,
+    de?.offsetHeight ?? 0
+  );
+}
+
+function setupIframeAutoHeight() {
+  // Initial + delayed (images/fonts can shift height)
+  const send = () => postHeightToParent(measureDocHeightPx());
+
+  // Send early and after load
+  send();
+  window.addEventListener("load", send, { passive: true });
+
+  // Keep it updated when layout changes
+  const ro = new ResizeObserver(() => send());
+
+  // Observe the whole app root if present, else fallback to body
+  const appRoot = document.getElementById("appRoot") || document.body;
+  if (appRoot) ro.observe(appRoot);
+
+  // Some changes happen without resize observer firing immediately (e.g. class toggles)
+  const mo = new MutationObserver(() => send());
+  mo.observe(appRoot || document.body, {
+    attributes: true,
+    childList: true,
+    subtree: true,
+  });
+
+  // Optional: expose a manual trigger for places you know change height
+  window.__triadsSendHeight = send;
+}
 
   function ensureAudioGraph() {
     if (audioCtx) return audioCtx;
@@ -475,13 +535,15 @@
     started: false,
     submitted: false,
     questions: [],
-    questionCount: 18,
+    questionCount: 10,
+    createdOn: null,
+    createdOnText: "",
   };
 
   function clampQuestions(n) {
     const v = Number(n);
-    if (!Number.isFinite(v)) return 18;
-    return Math.min(30, Math.max(1, Math.round(v)));
+    if (!Number.isFinite(v)) return 10;
+    return Math.min(24, Math.max(1, Math.round(v)));
   }
 
   function generateQuestions(count) {
@@ -520,6 +582,9 @@
     state.submitted = false;
     state.questions = [];
 
+    state.createdOn = null;
+    state.createdOnText = "";
+
     questionsList.innerHTML = "";
     resultsPanel.classList.add("hidden");
     resultsSummary.textContent = "—";
@@ -529,8 +594,7 @@
     downloadScorecardBtn.disabled = true;
     resetBtn.disabled = true;
 
-    quizMeta.textContent = "—";
-    if (quizTitle) quizTitle.textContent = "—";
+    quizMeta.textContent = "";
     beginModal.classList.remove("hidden");
 
     updatePageAdvice();
@@ -540,6 +604,9 @@
     state.started = true;
     state.submitted = false;
     state.questions = generateQuestions(state.questionCount);
+
+    state.createdOn = new Date();
+    state.createdOnText = state.createdOn.toLocaleDateString("en-GB");
 
     renderQuiz();
     submitBtn.disabled = false;
@@ -559,11 +626,11 @@
   }
 
   function updatePageAdvice() {
-    const qCount = clampQuestions(Number(questionCountSelect?.value ?? 18));
+    const qCount = clampQuestions(Number(questionCountSelect?.value ?? 10));
     state.questionCount = qCount;
 
-    const pages = Math.ceil(qCount / 10);
-    const perPage = qCount <= 10 ? `${qCount} on 1 page` : `10 per page (last page ${qCount % 10 || 10})`;
+    const pages = Math.ceil(qCount / 24);
+    const perPage = qCount <= 24 ? `${qCount} on 1 page` : `24 per page (last page ${qCount % 24 || 24})`;
 
     if (pageAdvice) {
       pageAdvice.textContent = `PDF tip: ${qCount} questions → ${pages} A4 page(s), ${perPage}.`;
@@ -591,10 +658,8 @@
 
   function renderQuiz() {
     questionsList.innerHTML = "";
-
-    const stamp = new Date();
-    quizMeta.textContent = `Loaded: ${stamp.toLocaleString()}`;
-    if (quizTitle) quizTitle.textContent = `${state.questions.length} Questions`;
+    // Main quiz page: hide the Created On stamp (still stored for PDFs).
+    quizMeta.textContent = "";
 
     state.questions.forEach((q, index) => {
       const li = document.createElement("li");
@@ -884,15 +949,20 @@
     hostEl.innerHTML = "";
   }
 
-  // -------------------- Task sheet PDF (10 questions per page) --------------------
+  // -------------------- Task sheet PDF (2 columns, 24 questions per page) --------------------
   function buildTaskSheetPages() {
-    const loadedAt = quizMeta.textContent || "";
+    const loadedAt = state.createdOnText ? `Created On: ${state.createdOnText}` : "";
     const totalQ = state.questions.length;
-    const chunks = chunkArray(state.questions, 10);
+    const chunks = chunkArray(state.questions, 24);
 
     return chunks.map((chunk, pageIndex) => {
       const page = document.createElement("div");
       page.className = "printPage";
+
+      const titleImg = document.createElement("img");
+      titleImg.className = "sheetTitleImage";
+      titleImg.src = "images/titledownload.png";
+      titleImg.alt = "Root Position Triads";
 
       const title = document.createElement("div");
       title.className = "sheetTitle";
@@ -900,13 +970,13 @@
 
       const meta = document.createElement("div");
       meta.className = "sheetMeta";
-      meta.textContent = `${loadedAt} • ${totalQ} questions • Page ${pageIndex + 1} / ${chunks.length}`;
+      meta.textContent = `${loadedAt ? loadedAt + " • " : ""}${totalQ} questions • Page ${pageIndex + 1} / ${chunks.length}`;
 
       const list = document.createElement("ol");
       list.className = "sheetList";
 
       chunk.forEach((q, localIdx) => {
-        const number = pageIndex * 10 + localIdx + 1;
+        const number = pageIndex * 24 + localIdx + 1;
 
         const item = document.createElement("li");
         item.className = "sheetQ";
@@ -931,6 +1001,7 @@
         list.appendChild(item);
       });
 
+      page.appendChild(titleImg);
       page.appendChild(title);
       page.appendChild(meta);
       page.appendChild(list);
@@ -950,19 +1021,24 @@
     });
   }
 
-  // -------------------- Scorecard PDF (10 questions per page) --------------------
+  // -------------------- Scorecard PDF (2 columns, 24 questions per page) --------------------
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
   }
 
   function buildScorecardPages(playerName, total, max) {
-    const loadedAt = quizMeta.textContent || "";
+    const loadedAt = state.createdOnText ? `Created On: ${state.createdOnText}` : "";
     const totalQ = state.questions.length;
-    const chunks = chunkArray(state.questions, 10);
+    const chunks = chunkArray(state.questions, 24);
 
     return chunks.map((chunk, pageIndex) => {
       const page = document.createElement("div");
       page.className = "printPage";
+
+      const titleImg = document.createElement("img");
+      titleImg.className = "sheetTitleImage";
+      titleImg.src = "images/titledownload.png";
+      titleImg.alt = "Root Position Triads";
 
       const title = document.createElement("div");
       title.className = "sheetTitle";
@@ -970,8 +1046,9 @@
 
       const meta = document.createElement("div");
       meta.className = "sheetMeta";
-      meta.textContent = `${loadedAt} • ${totalQ} questions • Page ${pageIndex + 1} / ${chunks.length}`;
+      meta.textContent = `${loadedAt ? loadedAt + " • " : ""}${totalQ} questions • Page ${pageIndex + 1} / ${chunks.length}`;
 
+      page.appendChild(titleImg);
       page.appendChild(title);
       page.appendChild(meta);
 
@@ -990,7 +1067,7 @@
       const list = document.createElement("ol");
       list.className = "sheetList";
 
-      const startIdx = pageIndex * 10;
+      const startIdx = pageIndex * 24;
       chunk.forEach((q, localIdx) => {
         const idx = startIdx + localIdx;
         const item = document.createElement("li");
@@ -1097,6 +1174,7 @@
 
   // -------------------- Init --------------------
   function init() {
+    setupIframeAutoHeight();
     initTopKeyboard();
     bindEvents();
     updatePageAdvice();
