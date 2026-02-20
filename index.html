@@ -21,8 +21,8 @@
       </picture>
 
       <p class="app-subtitle">
-        Identify the <strong>1st (root)</strong>, <strong>3rd</strong> and <strong>5th</strong> of each triad.
-        Use the piano at the top and the <strong>Information</strong> button for help.
+        Identify the <strong>1st (root)</strong>, <strong>3rd</strong> and <strong>5th</strong> of each major or minor triad.
+        Use the interactive piano at the top and the <strong>Information</strong> button for help.
       </p>
     </header>
 
@@ -30,7 +30,7 @@
     <div id="beginModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="beginTitle">
       <div class="modalCard" role="document">
         <div class="modalHeader">
-          <h2 id="beginTitle">Welcome 👋</h2>
+          <h2 id="beginTitle">Welcome! 👋</h2>
         </div>
 
         <div class="modalBody">
@@ -70,7 +70,6 @@
                 <option value="24">24</option>
               </select>
             </div>
-            <div id="pageAdvice" class="beginAdvice" aria-live="polite">—</div>
           </div>
         </div>
 
@@ -84,13 +83,14 @@
     <section class="controlsPanel controlsPanelActions" aria-label="top actions">
       <div class="actionsRow actionsCentered">
         <button id="infoBtn" type="button">Information</button>
+        <button id="inputModeBtn" type="button" disabled>Input mode: Dropdown</button>
         <button id="downloadTaskBtn" type="button" disabled>Download as A4 task sheet</button>
         <button id="downloadScorecardBtn" type="button" disabled>Download scorecard</button>
         <button id="resetBtn" type="button" disabled>Reset game</button>
       </div>
     </section>
 
-    <!-- Interactive 2-octave keyboard -->
+    <!-- Reference keyboard (3 octaves from C3) -->
     <section class="keyboardWrap" aria-label="piano keyboard">
       <div id="topKeyboardMount" class="mount topKeyboardMount" aria-label="Interactive keyboard"></div>
     </section>
@@ -100,6 +100,9 @@
       <div class="quizHeaderRow">
         <div class="quizTitle" id="quizTitle">
           <img class="questionsBadge" src="images/questions.png" alt="Questions" />
+          <div id="kbdModeHint" class="kbdModeHint hidden">
+            Highlight the notes of the chords for each question on the keyboards - you only need to select one of each note, and can place the chord on any octave.
+          </div>
         </div>
         <div class="quizMeta" id="quizMeta">—</div>
       </div>
@@ -134,21 +137,26 @@
         </div>
         <div class="modalBody">
           <p>
-            A <strong>triad</strong> is a 3-note chord built from stacked thirds.
+            A <strong>triad</strong> is a 3-note chord built by stacking thirds (see below) above a starting (root) note.
             In <strong>root position</strong>, the notes are the <strong>1st (root)</strong>,
-            <strong>3rd</strong>, and <strong>5th</strong> of the scale.
+            <strong>3rd</strong>, and <strong>5th</strong> up in the scale. The two most common types of triads in modern Western music are the <strong>major</strong> triad and the <strong>minor</strong> triad.
+            More often than not the notes of either a major or a minor chord will be played by instruments accompanying the melody line (what we might commonly think of as the 'tune' that you might hum along to).
           </p>
           <p>
-            Formulas (in semitones from the root):
-            <br><strong>Major</strong>: 0, +4, +7
-            <br><strong>Minor</strong>: 0, +3, +7
+            We can build these chords with the formulas:
+            <br>
+            <br><strong>Major</strong>: X (+4 semitones) Y (+3 semitones) Z
+            <br><strong>Minor</strong>: X (+3 semitones) Y (+4 semitones) Z
           </p>
+          <p>Note: The interval of 4 semitones is known as a <strong>Major 3rd (M3)</strong>, whilst the interval of 3 semitones is known as a <strong>Minor 3rd (m3)</strong>. Therefore, we could also write these formulas as:</p>
+          <strong>Major</strong>: X (+ Major 3rd) Y (+ Minor 3rd) Z
+            <br><strong>Minor</strong>: X (+ Minor 3rd) Y (+ Major 3rd) Z
           <p>
-            Use the keyboard to audition notes; then choose the correct note names in each dropdown.
+            Use the reference keyboard to audition notes; then answer using the selected input mode.
           </p>
         </div>
         <div class="modalFooter">
-          <button id="infoOk" class="primary" type="button">Got it</button>
+          <button id="infoOk" class="primary" type="button">Got it!</button>
         </div>
       </div>
     </div>

@@ -1,9 +1,9 @@
 /* /script.js
-   Fixes:
-   - Game startup: removed stray duplicate code block that referenced undefined variables.
-   - PDF: centered margins, 10 questions per page, and no question blocks split across pages
-     (render one HTML page per PDF page, instead of slicing one tall canvas).
-   - Start modal: pick number of questions as 1..30.
+   Changes:
+   - Added input mode toggle (Dropdown / Keyboard per question).
+   - Keyboard mode: 2-octave selectable keyboard per question + "Hear selection".
+   - Task sheet PDF now prints 2-octave blank keyboards per question with white-filled black keys.
+   - Top reference keyboard now starts at C3 and spans 3 octaves (C3..B5).
 */
 (() => {
   "use strict";
@@ -13,13 +13,28 @@
   const FADE_OUT_SEC = 0.12;
   const LIMITER_THRESHOLD_DB = -6;
 
-  // Top keyboard range (2 octaves): C4..B5 inclusive
-  const KBD_START_OCT = 4;
-  const KBD_OCTAVES = 2;
+  // Reference keyboard at top: 3 octaves from C3..B5 (no C6+)
+  const KBD_START_OCT = 3;
+  const KBD_OCTAVES = 3;
 
-  // Mini keyboards (3 octaves): C3..B5 inclusive (second C is C4)
+  // Mini keyboards (results): 3 octaves C3..B5
   const MINI_KBD_START_OCT = 3;
   const MINI_KBD_OCTAVES = 3;
+  const MINI_KBD_INCLUDE_END_C = true;
+
+  // Per-question input keyboard (new mode): 2 octaves (space-friendly)
+  const Q_KBD_START_OCT = 3; // C3
+  const Q_KBD_OCTAVES = 3;   // C3..B5 (+ final C)
+  const Q_KBD_INCLUDE_END_C = true;
+
+  // Task sheet printed keyboards: 2 octaves and colourable black keys
+  const TASK_KBD_START_OCT = 3; // C3
+  const TASK_KBD_OCTAVES = 3;
+  const TASK_KBD_INCLUDE_END_C = true;
+
+  // Task sheet questions per page (keyboards are larger than lines)
+  const TASK_Q_PER_PAGE_KBD = 12;
+  const TASK_Q_PER_PAGE_DROPDOWN = 24;
 
   // PDF margins (pt)
   const PDF_MARGIN_PT = 18;
@@ -58,6 +73,11 @@
     { pc: 11, label: "B" },
   ];
 
+  const INPUT_MODE = {
+    DROPDOWN: "dropdown",
+    KEYBOARD: "keyboard",
+  };
+
   // -------------------- DOM --------------------
   const $ = (id) => document.getElementById(id);
 
@@ -70,6 +90,8 @@
   const infoModal = $("infoModal");
   const infoOk = $("infoOk");
 
+  const inputModeBtn = $("inputModeBtn");
+
   const downloadTaskBtn = $("downloadTaskBtn");
   const downloadScorecardBtn = $("downloadScorecardBtn");
   const resetBtn = $("resetBtn");
@@ -80,6 +102,7 @@
   const quizTitle = $("quizTitle");
   const quizMeta = $("quizMeta");
   const questionsList = $("questionsList");
+  const kbdModeHint = $("kbdModeHint");
   const submitBtn = $("submitBtn");
 
   const resultsPanel = $("resultsPanel");
@@ -97,67 +120,50 @@
   const activeVoices = new Set();
 
   // --- Iframe height reporting (postMessage) ---
-function postHeightToParent(height) {
-  // If not embedded, do nothing.
-  if (window.parent === window) return;
+  function postHeightToParent(height) {
+    if (window.parent === window) return;
+    const TARGET_ORIGIN = "*";
+    window.parent.postMessage(
+      {
+        iframeHeight: Math.max(0, Math.round(height)),
+        type: "triads:height",
+        height: Math.max(0, Math.round(height)),
+        frameId: document.documentElement.getAttribute("data-frame-id") || null,
+      },
+      TARGET_ORIGIN
+    );
+  }
 
-  // Safer if you set this to your parent origin, e.g. "https://example.com"
-  const TARGET_ORIGIN = "*";
+  function measureDocHeightPx() {
+    const de = document.documentElement;
+    const body = document.body;
+    return Math.max(
+      body?.scrollHeight ?? 0,
+      body?.offsetHeight ?? 0,
+      de?.clientHeight ?? 0,
+      de?.scrollHeight ?? 0,
+      de?.offsetHeight ?? 0
+    );
+  }
 
-  window.parent.postMessage(
-    {
-      // Squarespace parent listener expects this key:
-      iframeHeight: Math.max(0, Math.round(height)),
-  
-      // Keep these for compatibility with other listeners:
-      type: "triads:height",
-      height: Math.max(0, Math.round(height)),
-      frameId: document.documentElement.getAttribute("data-frame-id") || null,
-    },
-    TARGET_ORIGIN
-  );
-}
+  function setupIframeAutoHeight() {
+    const send = () => postHeightToParent(measureDocHeightPx());
+    send();
+    window.addEventListener("load", send, { passive: true });
 
-function measureDocHeightPx() {
-  // Measure the actual rendered document height (works well with modals/results expanding)
-  const de = document.documentElement;
-  const body = document.body;
+    const ro = new ResizeObserver(() => send());
+    const appRoot = document.getElementById("appRoot") || document.body;
+    if (appRoot) ro.observe(appRoot);
 
-  return Math.max(
-    body?.scrollHeight ?? 0,
-    body?.offsetHeight ?? 0,
-    de?.clientHeight ?? 0,
-    de?.scrollHeight ?? 0,
-    de?.offsetHeight ?? 0
-  );
-}
+    const mo = new MutationObserver(() => send());
+    mo.observe(appRoot || document.body, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+    });
 
-function setupIframeAutoHeight() {
-  // Initial + delayed (images/fonts can shift height)
-  const send = () => postHeightToParent(measureDocHeightPx());
-
-  // Send early and after load
-  send();
-  window.addEventListener("load", send, { passive: true });
-
-  // Keep it updated when layout changes
-  const ro = new ResizeObserver(() => send());
-
-  // Observe the whole app root if present, else fallback to body
-  const appRoot = document.getElementById("appRoot") || document.body;
-  if (appRoot) ro.observe(appRoot);
-
-  // Some changes happen without resize observer firing immediately (e.g. class toggles)
-  const mo = new MutationObserver(() => send());
-  mo.observe(appRoot || document.body, {
-    attributes: true,
-    childList: true,
-    subtree: true,
-  });
-
-  // Optional: expose a manual trigger for places you know change height
-  window.__triadsSendHeight = send;
-}
+    window.__triadsSendHeight = send;
+  }
 
   function ensureAudioGraph() {
     if (audioCtx) return audioCtx;
@@ -279,7 +285,16 @@ function setupIframeAutoHeight() {
   function pitchFromPcOct(pc, oct) {
     return oct * 12 + pc;
   }
-  function getStemForPc(pc) {
+  
+
+function rangeHiPitch(startPitch, octaves, includeEndC = false) {
+  const totalSemis = Math.max(0, Math.round(octaves)) * 12;
+  let hi = startPitch + totalSemis - 1;
+  if (includeEndC && pcFromPitch(startPitch) === 0) hi += 1; // include the final C
+  return hi;
+}
+
+function getStemForPc(pc) {
     return PC_TO_STEM[(pc + 12) % 12] || null;
   }
 
@@ -338,7 +353,7 @@ function setupIframeAutoHeight() {
     return pcs.map(noteLabelForPc).join(", ");
   }
 
-  // -------------------- Keyboard SVG (no labels) --------------------
+  // -------------------- Keyboard SVG --------------------
   const SVG_NS = "http://www.w3.org/2000/svg";
 
   function svgEl(tag, attrs = {}, children = []) {
@@ -359,16 +374,17 @@ function setupIframeAutoHeight() {
   function buildKeyboardSvg({
     startPitch,
     octaves,
+    includeEndC = false,
     widthPx = 980,
     heightPx = 190,
     interactive = true,
     ariaLabel = "Keyboard",
-    highlight = null,
+    highlight = null, // Map<pitch, "hit"|"ok"|"bad">
     onKeyDown = null,
+    theme = null, // { blackFill, whiteFill, blackStroke, whiteStroke, frameFill }
   }) {
-    const totalSemis = octaves * 12;
     const lo = startPitch;
-    const hi = startPitch + totalSemis + 11;
+    const hi = rangeHiPitch(startPitch, octaves, includeEndC);
 
     const all = [];
     for (let p = lo; p <= hi; p++) all.push(p);
@@ -380,6 +396,14 @@ function setupIframeAutoHeight() {
     const BORDER = 10;
     const RADIUS = 18;
 
+    const t = {
+      frameFill: theme?.frameFill ?? "#fff",
+      whiteFill: theme?.whiteFill ?? "#fff",
+      whiteStroke: theme?.whiteStroke ?? "#222",
+      blackFill: theme?.blackFill ?? "#111",
+      blackStroke: theme?.blackStroke ?? "#000",
+    };
+
     const whitePitches = all.filter((p) => whiteIndexInOctave(pcFromPitch(p)) != null);
     const totalWhite = whitePitches.length;
 
@@ -388,8 +412,8 @@ function setupIframeAutoHeight() {
     const outerH = WHITE_H + BORDER * 2;
 
     const svg = svgEl("svg", {
-      width: widthPx,
-      height: heightPx,
+      width: outerW,
+height: outerH,
       viewBox: `0 0 ${outerW} ${outerH}`,
       preserveAspectRatio: "xMidYMid meet",
       role: "img",
@@ -398,9 +422,9 @@ function setupIframeAutoHeight() {
 
     const style = svgEl("style");
     style.textContent = `
-      .frame{ fill:#fff; stroke:#000; stroke-width:${BORDER}; rx:${RADIUS}; ry:${RADIUS}; }
-      .w rect{ fill:#fff; stroke:#222; stroke-width:1; }
-      .b rect{ fill:#111; stroke:#000; stroke-width:1; rx:3; ry:3; }
+      .frame{ fill:${t.frameFill}; stroke:#000; stroke-width:${BORDER}; rx:${RADIUS}; ry:${RADIUS}; }
+      .w rect{ fill:${t.whiteFill}; stroke:${t.whiteStroke}; stroke-width:1; }
+      .b rect{ fill:${t.blackFill}; stroke:${t.blackStroke}; stroke-width:1; rx:3; ry:3; }
       .key { cursor: ${interactive ? "pointer" : "default"}; }
       .hit rect { fill: var(--kbdHit) !important; }
       .hitOk rect { fill: var(--kbdHitOk) !important; }
@@ -504,7 +528,49 @@ function setupIframeAutoHeight() {
     window.setTimeout(() => groupEl.classList.remove("hit"), ms);
   }
 
-  // -------------------- Root-position pitch helpers (mini keyboards) --------------------
+  function buildPcHighlightMapForRange({ startPitch, octaves, includeEndC = false, selectedPcs, okBadMap = null }) {
+    const lo = startPitch;
+    const hi = rangeHiPitch(startPitch, octaves, includeEndC);
+
+    const pcs = (selectedPcs || []).filter((v) => v != null).map((v) => ((v % 12) + 12) % 12);
+    if (!pcs.length && !okBadMap) return null;
+
+    const map = new Map();
+    for (let p = lo; p <= hi; p++) {
+      const pc = pcFromPitch(p);
+      if (okBadMap?.has(p)) {
+        map.set(p, okBadMap.get(p));
+      } else if (pcs.includes(pc)) {
+        map.set(p, "hit");
+      }
+    }
+    return map;
+  }
+
+
+  function buildPitchHighlightMapForRange({ startPitch, octaves, includeEndC = false, selectedPitches, okBadMap = null }) {
+    const lo = startPitch;
+    const hi = rangeHiPitch(startPitch, octaves, includeEndC);
+
+    const pitches = (selectedPitches || [])
+      .filter((v) => Number.isFinite(v))
+      .map((v) => Math.round(v));
+
+    if (!pitches.length && !okBadMap) return null;
+
+    const set = new Set(pitches);
+    const map = new Map();
+    for (let p = lo; p <= hi; p++) {
+      if (okBadMap?.has(p)) {
+        map.set(p, okBadMap.get(p));
+      } else if (set.has(p)) {
+        map.set(p, "hit");
+      }
+    }
+    return map;
+  }
+
+  // -------------------- Root-position pitch helpers (mini keyboards + playback) --------------------
   function nextPitchAtOrAbove(pc, minPitch) {
     const want = ((pc % 12) + 12) % 12;
     let p = Math.max(0, Math.floor(minPitch));
@@ -541,6 +607,7 @@ function setupIframeAutoHeight() {
     questionCount: 10,
     createdOn: null,
     createdOnText: "",
+    inputMode: INPUT_MODE.DROPDOWN,
   };
 
   function clampQuestions(n) {
@@ -574,7 +641,10 @@ function setupIframeAutoHeight() {
       quality: q.quality,
       correctPcs: triadPcs(q.rootPc, q.quality),
       userPcs: [null, null, null],
+      activeIdx: 0,
       marks: 0,
+      selectedPitches: [],
+      octaveError: false,
     }));
   }
 
@@ -584,9 +654,9 @@ function setupIframeAutoHeight() {
     state.started = false;
     state.submitted = false;
     state.questions = [];
-
     state.createdOn = null;
     state.createdOnText = "";
+    state.inputMode = INPUT_MODE.DROPDOWN;
 
     questionsList.innerHTML = "";
     resultsPanel.classList.add("hidden");
@@ -600,6 +670,10 @@ function setupIframeAutoHeight() {
     quizMeta.textContent = "";
     beginModal.classList.remove("hidden");
 
+    inputModeBtn.disabled = true;
+    inputModeBtn.textContent = "Input mode: Dropdown";
+
+    updateKeyboardModeHint();
     updatePageAdvice();
   }
 
@@ -612,12 +686,29 @@ function setupIframeAutoHeight() {
     state.createdOnText = state.createdOn.toLocaleDateString("en-GB");
 
     renderQuiz();
+
     submitBtn.disabled = false;
     downloadTaskBtn.disabled = false;
     downloadScorecardBtn.disabled = true;
     resetBtn.disabled = false;
 
+    inputModeBtn.disabled = false;
+    syncInputModeBtnText();
+    updateKeyboardModeHint();
+
     beginModal.classList.add("hidden");
+  }
+
+
+  function updateKeyboardModeHint() {
+    if (!kbdModeHint) return;
+    if (state.inputMode === INPUT_MODE.KEYBOARD) kbdModeHint.classList.remove("hidden");
+    else kbdModeHint.classList.add("hidden");
+  }
+
+  function syncInputModeBtnText() {
+    inputModeBtn.textContent =
+      state.inputMode === INPUT_MODE.KEYBOARD ? "Input mode: Keyboard" : "Input mode: Dropdown";
   }
 
   // -------------------- Begin modal question-count logic --------------------
@@ -632,8 +723,14 @@ function setupIframeAutoHeight() {
     const qCount = clampQuestions(Number(questionCountSelect?.value ?? 10));
     state.questionCount = qCount;
 
-    const pages = Math.ceil(qCount / 24);
-    const perPage = qCount <= 24 ? `${qCount} on 1 page` : `24 per page (last page ${qCount % 24 || 24})`;
+    const perPageLimit =
+      state.inputMode === INPUT_MODE.KEYBOARD ? TASK_Q_PER_PAGE_KBD : TASK_Q_PER_PAGE_DROPDOWN;
+
+    const pages = Math.ceil(qCount / perPageLimit);
+    const perPage =
+      qCount <= perPageLimit
+        ? `${qCount} on 1 page`
+        : `${perPageLimit} per page (last page ${qCount % perPageLimit || perPageLimit})`;
 
     if (pageAdvice) {
       pageAdvice.textContent = `PDF tip: ${qCount} questions → ${pages} A4 page(s), ${perPage}.`;
@@ -659,9 +756,165 @@ function setupIframeAutoHeight() {
     return sel;
   }
 
+  function clearQuestionAnswer(q) {
+    q.userPcs = [null, null, null];
+    q.activeIdx = 0;
+  }
+
+
+  function updateQuestionFromSelectedPitches(q) {
+    const pitches = Array.isArray(q.selectedPitches) ? q.selectedPitches.slice() : [];
+    pitches.sort((a, b) => a - b);
+
+    q.selectedPitches = pitches;
+
+    const pcs = pitches.map((p) => pcFromPitch(p));
+    q.userPcs = [null, null, null];
+
+    if (pcs.length >= 1) q.userPcs[0] = pcs[0];
+    if (pcs.length >= 2) q.userPcs[1] = pcs[1];
+    if (pcs.length >= 3) q.userPcs[2] = pcs[2];
+
+    if (pitches.length >= 2) {
+      q.octaveError = pitches[pitches.length - 1] - pitches[0] > 11;
+    } else {
+      q.octaveError = false;
+    }
+  }
+
+  function renderKeyboardInputForQuestion(q, li) {
+    updateQuestionFromSelectedPitches(q);
+
+    const wrap = document.createElement("div");
+    wrap.className = "qKbdWrap";
+
+    const slots = document.createElement("div");
+    slots.className = "qSlots";
+
+    const labels = ["1st (root)", "3rd", "5th"];
+    labels.forEach((lab, idx) => {
+      const s = document.createElement("div");
+      s.className = "qSlot";
+      s.dataset.slot = String(idx);
+
+      const l = document.createElement("div");
+      l.className = "qSlotLabel";
+      l.textContent = lab;
+
+      const v = document.createElement("div");
+      v.className = "qSlotValue";
+      v.id = `${q.id}-slot-${idx}`;
+      v.textContent = q.userPcs[idx] == null ? "—" : noteLabelForPc(q.userPcs[idx]);
+
+      s.appendChild(l);
+      s.appendChild(v);
+      slots.appendChild(s);
+    });
+
+    const mount = document.createElement("div");
+    mount.className = "qKbdMount mount";
+    mount.id = `${q.id}-kbd-mount`;
+
+    const btnRow = document.createElement("div");
+    btnRow.className = "qSlotBtnRow";
+    btnRow.id = `${q.id}-kbd-actions`;
+
+    const hearBtn = document.createElement("button");
+    hearBtn.type = "button";
+    hearBtn.textContent = "Hear selection";
+    hearBtn.disabled = state.submitted;
+    hearBtn.addEventListener("click", async () => {
+      await resumeAudioIfNeeded();
+      stopAllNotes(0.02);
+
+      const pitches = (q.selectedPitches || []).slice().sort((a,b)=>a-b);
+      if (!pitches.length) return;
+      await playPitchesWindowed(pitches, 1.2);
+    });
+
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.textContent = "Clear";
+    clearBtn.disabled = state.submitted;
+    clearBtn.addEventListener("click", () => {
+      if (state.submitted) return;
+      clearQuestionAnswer(q);
+      updateQuestionFromSelectedPitches(q);
+      renderQuestionKeyboardMount(q);
+      renderKeyboardSlotValues(q);
+    });
+
+    btnRow.appendChild(hearBtn);
+    btnRow.appendChild(clearBtn);
+
+    wrap.appendChild(slots);
+    wrap.appendChild(mount);
+    wrap.appendChild(btnRow);
+
+    li.appendChild(wrap);
+
+    renderQuestionKeyboardMount(q, mount);
+  }
+
+  function renderKeyboardSlotValues(q) {
+    for (let i = 0; i < 3; i++) {
+      const el = $(`${q.id}-slot-${i}`);
+      if (el) el.textContent = q.userPcs[i] == null ? "—" : noteLabelForPc(q.userPcs[i]);
+    }
+  }
+
+  function renderQuestionKeyboardMount(q, mountEl = null) {
+    const mount = mountEl || $(`${q.id}-kbd-mount`);
+    if (!mount) return;
+
+    const startPitch = pitchFromPcOct(0, Q_KBD_START_OCT);
+    const hl = buildPitchHighlightMapForRange({
+      startPitch,
+      octaves: Q_KBD_OCTAVES,
+      includeEndC: Q_KBD_INCLUDE_END_C,
+      selectedPitches: q.selectedPitches,
+    });
+
+    mount.innerHTML = "";
+    mount.appendChild(
+      buildKeyboardSvg({
+        startPitch,
+        octaves: Q_KBD_OCTAVES,
+        includeEndC: Q_KBD_INCLUDE_END_C,
+        widthPx: 880,
+        heightPx: 165,
+        interactive: !state.submitted,
+        ariaLabel: "Question keyboard",
+        highlight: hl,
+        onKeyDown: async (pitch, groupEl) => {
+      if (state.submitted) return;
+
+      await resumeAudioIfNeeded();
+      stopAllNotes(0.02);
+      await playPitchesWindowed([pitch], 0.7);
+      flashKeyGroup(groupEl, 180);
+
+      q.selectedPitches = Array.isArray(q.selectedPitches) ? q.selectedPitches : [];
+      const p = Math.round(pitch);
+
+      const idx = q.selectedPitches.indexOf(p);
+      if (idx >= 0) {
+        q.selectedPitches.splice(idx, 1);
+      } else {
+        if (q.selectedPitches.length >= 3) return;
+        q.selectedPitches.push(p);
+      }
+
+      updateQuestionFromSelectedPitches(q);
+      renderKeyboardSlotValues(q);
+      renderQuestionKeyboardMount(q);
+    },
+      })
+    );
+  }
+
   function renderQuiz() {
     questionsList.innerHTML = "";
-    // Main quiz page: hide the Created On stamp (still stored for PDFs).
     quizMeta.textContent = "";
 
     state.questions.forEach((q, index) => {
@@ -683,43 +936,53 @@ function setupIframeAutoHeight() {
 
       top.appendChild(title);
       top.appendChild(marks);
+      li.appendChild(top);
 
-      const grid = document.createElement("div");
-      grid.className = "qGrid";
+      if (state.inputMode === INPUT_MODE.DROPDOWN) {
+        const grid = document.createElement("div");
+        grid.className = "qGrid";
 
-      const fields = [
-        { label: "1st (root)", idx: 0 },
-        { label: "3rd", idx: 1 },
-        { label: "5th", idx: 2 },
-      ];
+        const fields = [
+          { label: "1st (root)", idx: 0 },
+          { label: "3rd", idx: 1 },
+          { label: "5th", idx: 2 },
+        ];
 
-      for (const f of fields) {
-        const wrap = document.createElement("div");
-        wrap.className = "qField";
+        for (const f of fields) {
+          const wrap = document.createElement("div");
+          wrap.className = "qField";
 
-        const lab = document.createElement("label");
-        lab.setAttribute("for", `${q.id}-sel-${f.idx}`);
-        lab.textContent = f.label;
+          const lab = document.createElement("label");
+          lab.setAttribute("for", `${q.id}-sel-${f.idx}`);
+          lab.textContent = f.label;
 
-        const sel = buildNoteSelect(`${q.id}-sel-${f.idx}`);
-        sel.addEventListener("change", () => {
-          q.userPcs[f.idx] = sel.value === "" ? null : Number(sel.value);
-        });
+          const sel = buildNoteSelect(`${q.id}-sel-${f.idx}`);
+          sel.value = q.userPcs[f.idx] == null ? "" : String(q.userPcs[f.idx]);
+          sel.disabled = state.submitted;
 
-        wrap.appendChild(lab);
-        wrap.appendChild(sel);
-        grid.appendChild(wrap);
+          sel.addEventListener("change", () => {
+            q.userPcs[f.idx] = sel.value === "" ? null : Number(sel.value);
+          });
+
+          wrap.appendChild(lab);
+          wrap.appendChild(sel);
+          grid.appendChild(wrap);
+        }
+
+        li.appendChild(grid);
+      } else {
+        renderKeyboardInputForQuestion(q, li);
       }
 
       const feedback = document.createElement("div");
       feedback.className = "qFeedback hidden";
       feedback.id = `${q.id}-feedback`;
-
-      li.appendChild(top);
-      li.appendChild(grid);
       li.appendChild(feedback);
+
       questionsList.appendChild(li);
     });
+
+    window.__triadsSendHeight?.();
   }
 
   function setSelectDisabledAll(disabled) {
@@ -729,7 +992,7 @@ function setupIframeAutoHeight() {
     });
   }
 
-  // -------------------- Mini keyboards per question --------------------
+  // -------------------- Mini keyboards per question (results) --------------------
   function makeMiniKeyboardBlock({ title, mountId, btnText, onPlay }) {
     const block = document.createElement("div");
     block.className = "miniKbdBlock";
@@ -767,20 +1030,31 @@ function setupIframeAutoHeight() {
     row.className = "qFeedbackRow";
 
     const miniStartPitch = pitchFromPcOct(0, MINI_KBD_START_OCT);
-
     const correctPitches = triadRootPositionPitches(q.rootPc, q.quality, 4);
-    const answeredPitches = answeredRootPositionPitches(q.userPcs, 4);
 
     const correctPcs = q.correctPcs.slice();
     const answeredPcs = q.userPcs.slice();
 
+    const answeredPitches =
+      state.inputMode === INPUT_MODE.KEYBOARD && (q.selectedPitches || []).length
+        ? (q.selectedPitches || []).slice().sort((a, b) => a - b)
+        : answeredRootPositionPitches(q.userPcs, 4);
+
     const answeredMap = new Map();
-    for (let i = 0; i < answeredPcs.length; i++) {
-      const pc = answeredPcs[i];
-      if (pc == null) continue;
-      const pitch = answeredPitches[i] ?? null;
-      if (pitch == null) continue;
-      answeredMap.set(pitch, correctPcs.includes(pc) ? "ok" : "bad");
+    if (state.inputMode === INPUT_MODE.KEYBOARD) {
+      // Mark exactly the pitches the user selected (single instance per key).
+      for (const p of answeredPitches) {
+        const pc = pcFromPitch(p);
+        answeredMap.set(p, correctPcs.includes(pc) ? "ok" : "bad");
+      }
+    } else {
+      for (let i = 0; i < answeredPcs.length; i++) {
+        const pc = answeredPcs[i];
+        if (pc == null) continue;
+        const pitch = answeredPitches[i] ?? null;
+        if (pitch == null) continue;
+        answeredMap.set(pitch, correctPcs.includes(pc) ? "ok" : "bad");
+      }
     }
 
     const correctMap = new Map();
@@ -794,7 +1068,8 @@ function setupIframeAutoHeight() {
       mountId: answeredMountId,
       btnText: "Play Answered Notes",
       onPlay: async () => {
-        await playPitchesWindowed(answeredPitches.length ? answeredPitches : correctPitches, 1.6);
+        const toPlay = answeredPitches.length ? answeredPitches : correctPitches;
+        await playPitchesWindowed(toPlay, 1.6);
       },
     });
 
@@ -811,11 +1086,11 @@ function setupIframeAutoHeight() {
     row.appendChild(correctBlock);
     fb.appendChild(row);
 
-    const line = document.createElement("div");
-    line.className = "qAnswerLine";
-
     const chosenText = answeredPcs.map((pc) => (pc == null ? "—" : noteLabelForPc(pc))).join(", ");
     const correctText = pcsToPretty(correctPcs);
+
+    const line = document.createElement("div");
+    line.className = "qAnswerLine";
 
     const okClass = q.marks === 3 ? "ok" : q.marks === 0 ? "bad" : "";
     line.innerHTML = `
@@ -827,6 +1102,14 @@ function setupIframeAutoHeight() {
       <br>
       Correct: <strong>${correctText}</strong>
     `;
+
+    if (state.inputMode === INPUT_MODE.KEYBOARD && q.selectedPitches?.length === 3 && q.octaveError) {
+      const warn = document.createElement("div");
+      warn.className = "qAnswerLine bad";
+      warn.textContent = "Note: for full marks the chord must fit within a single octave (root position).";
+      fb.appendChild(warn);
+    }
+
     fb.appendChild(line);
 
     const answeredMount = $(answeredMountId);
@@ -838,6 +1121,7 @@ function setupIframeAutoHeight() {
         buildKeyboardSvg({
           startPitch: miniStartPitch,
           octaves: MINI_KBD_OCTAVES,
+          includeEndC: MINI_KBD_INCLUDE_END_C,
           widthPx: 520,
           heightPx: 120,
           interactive: false,
@@ -853,6 +1137,7 @@ function setupIframeAutoHeight() {
         buildKeyboardSvg({
           startPitch: miniStartPitch,
           octaves: MINI_KBD_OCTAVES,
+          includeEndC: MINI_KBD_INCLUDE_END_C,
           widthPx: 520,
           heightPx: 120,
           interactive: false,
@@ -869,11 +1154,14 @@ function setupIframeAutoHeight() {
 
     setSelectDisabledAll(true);
     submitBtn.disabled = true;
+    inputModeBtn.disabled = true;
 
     let total = 0;
     const max = state.questions.length * 3;
 
     for (const q of state.questions) {
+      if (state.inputMode === INPUT_MODE.KEYBOARD) updateQuestionFromSelectedPitches(q);
+
       const correct = q.correctPcs;
       const user = q.userPcs;
 
@@ -881,6 +1169,11 @@ function setupIframeAutoHeight() {
       for (let i = 0; i < 3; i++) {
         if (user[i] != null && user[i] === correct[i]) marks += 1;
       }
+
+      if (state.inputMode === INPUT_MODE.KEYBOARD && q.selectedPitches?.length === 3 && q.octaveError) {
+        marks = 0;
+      }
+
       q.marks = marks;
       total += marks;
 
@@ -888,6 +1181,11 @@ function setupIframeAutoHeight() {
       if (marksEl) marksEl.textContent = `${marks} / 3`;
 
       renderMiniKeyboardsForQuestion(q);
+
+      if (state.inputMode === INPUT_MODE.KEYBOARD) {
+        const actions = $(`${q.id}-kbd-actions`);
+        if (actions) actions.remove();
+      }
     }
 
     resultsSummary.innerHTML = `
@@ -898,6 +1196,19 @@ function setupIframeAutoHeight() {
     resultsPanel.classList.remove("hidden");
 
     downloadScorecardBtn.disabled = false;
+
+    // In keyboard mode, hide the answering keyboard + its action buttons during the results phase.
+    if (state.inputMode === INPUT_MODE.KEYBOARD) {
+      state.questions.forEach((q) => {
+        const actions = $(`${q.id}-kbd-actions`);
+        if (actions) actions.remove();
+
+        const mount = $(`${q.id}-kbd-mount`);
+        if (mount) mount.remove();
+      });
+    }
+
+    window.__triadsSendHeight?.();
   }
 
   function validateBeforeSubmit() {
@@ -952,11 +1263,74 @@ function setupIframeAutoHeight() {
     hostEl.innerHTML = "";
   }
 
-  // -------------------- Task sheet PDF (2 columns, 24 questions per page) --------------------
+  // -------------------- Task sheet PDF (2 columns, keyboards, no split across pages) --------------------
+
+  // -------------------- Task sheet PDF (mode-dependent layout) --------------------
   function buildTaskSheetPages() {
     const loadedAt = state.createdOnText ? `Created On: ${state.createdOnText}` : "";
     const totalQ = state.questions.length;
-    const chunks = chunkArray(state.questions, 24);
+
+    // Dropdown mode: match legacy "lines" layout (script2/style2/html2)
+    if (state.inputMode === INPUT_MODE.DROPDOWN) {
+      const chunks = chunkArray(state.questions, TASK_Q_PER_PAGE_DROPDOWN);
+
+      return chunks.map((chunk, pageIndex) => {
+        const page = document.createElement("div");
+        page.className = "printPage";
+
+        const title = document.createElement("div");
+        title.className = "sheetTitle";
+        title.textContent = "Root Position Triads — Task Sheet";
+
+        const meta = document.createElement("div");
+        meta.className = "sheetMeta";
+        meta.textContent = `${loadedAt ? loadedAt + " • " : ""}${totalQ} questions • Page ${pageIndex + 1} / ${chunks.length}`;
+
+        const list = document.createElement("ol");
+        list.className = "sheetList";
+
+        chunk.forEach((q, localIdx) => {
+          const number = pageIndex * TASK_Q_PER_PAGE_DROPDOWN + localIdx + 1;
+
+          const item = document.createElement("li");
+          item.className = "sheetQ";
+
+          const qname = document.createElement("div");
+          qname.className = "sheetQName";
+          qname.textContent = `${number}. ${chordName(q.rootPc, q.quality)}`;
+
+          const row = document.createElement("div");
+          row.className = "sheetLineRow";
+
+          const labels = ["1st (root)", "3rd", "5th"];
+          for (const lab of labels) {
+            const box = document.createElement("div");
+            box.className = "sheetLine";
+            box.innerHTML = `<span>${lab}:</span> <span class="dots">............................</span>`;
+            row.appendChild(box);
+          }
+
+          item.appendChild(qname);
+          item.appendChild(row);
+          list.appendChild(item);
+        });
+
+        const titleImg = document.createElement("img");
+titleImg.className = "sheetTitleImage";
+titleImg.src = "images/titledownload.png";
+titleImg.alt = "Root Position Triads";
+
+page.appendChild(titleImg);
+page.appendChild(title);
+page.appendChild(meta);
+        page.appendChild(list);
+        return page;
+      });
+    }
+
+    // Keyboard mode: printable keyboards (colourable black keys)
+    const chunks = chunkArray(state.questions, TASK_Q_PER_PAGE_KBD);
+    const printStartPitch = pitchFromPcOct(0, TASK_KBD_START_OCT);
 
     return chunks.map((chunk, pageIndex) => {
       const page = document.createElement("div");
@@ -979,7 +1353,7 @@ function setupIframeAutoHeight() {
       list.className = "sheetList";
 
       chunk.forEach((q, localIdx) => {
-        const number = pageIndex * 24 + localIdx + 1;
+        const number = pageIndex * TASK_Q_PER_PAGE_KBD + localIdx + 1;
 
         const item = document.createElement("li");
         item.className = "sheetQ";
@@ -988,29 +1362,52 @@ function setupIframeAutoHeight() {
         qname.className = "sheetQName";
         qname.textContent = `${number}. ${chordName(q.rootPc, q.quality)}`;
 
-        const row = document.createElement("div");
-        row.className = "sheetLineRow";
+        const kbdBox = document.createElement("div");
+        kbdBox.className = "sheetKbd";
 
-        const labels = ["1st (root)", "3rd", "5th"];
-        for (const lab of labels) {
-          const box = document.createElement("div");
-          box.className = "sheetLine";
-          box.innerHTML = `<span>${lab}:</span> <span class="dots">............................</span>`;
-          row.appendChild(box);
-        }
+        const mount = document.createElement("div");
+        mount.className = "mount";
+
+        mount.appendChild(
+          buildKeyboardSvg({
+            startPitch: printStartPitch,
+            octaves: TASK_KBD_OCTAVES,
+            includeEndC: TASK_KBD_INCLUDE_END_C,
+            widthPx: 700,
+            heightPx: 150,
+            interactive: false,
+            ariaLabel: "Printable keyboard",
+            theme: {
+              frameFill: "#fff",
+              whiteFill: "#fff",
+              whiteStroke: "#000",
+              blackFill: "#fff",
+              blackStroke: "#000",
+            },
+          })
+        );
+
+        kbdBox.appendChild(mount);
 
         item.appendChild(qname);
-        item.appendChild(row);
+        item.appendChild(kbdBox);
         list.appendChild(item);
       });
 
       page.appendChild(titleImg);
       page.appendChild(title);
       page.appendChild(meta);
+
+      const hint = document.createElement("div");
+      hint.className = "sheetHint";
+      hint.textContent = "Colour in / mark one instance of the chord on the keyboards for each question.";
+      page.appendChild(hint);
+
       page.appendChild(list);
       return page;
     });
   }
+
 
   async function downloadTaskSheetPdf() {
     if (!state.started || !state.questions.length) return;
@@ -1024,7 +1421,7 @@ function setupIframeAutoHeight() {
     });
   }
 
-  // -------------------- Scorecard PDF (2 columns, 24 questions per page) --------------------
+  // -------------------- Scorecard PDF (unchanged layout, 24 per page) --------------------
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
   }
@@ -1126,9 +1523,9 @@ function setupIframeAutoHeight() {
       startPitch,
       octaves: KBD_OCTAVES,
       widthPx: 1100,
-      heightPx: 210,
+      heightPx: 220,
       interactive: true,
-      ariaLabel: "Interactive two-octave keyboard",
+      ariaLabel: "Interactive three-octave keyboard (C3..B5)",
       onKeyDown: async (pitch, groupEl) => {
         await resumeAudioIfNeeded();
         stopAllNotes(0.02);
@@ -1154,6 +1551,17 @@ function setupIframeAutoHeight() {
     infoOk.addEventListener("click", () => infoModal.classList.add("hidden"));
     infoModal.addEventListener("click", (e) => {
       if (e.target === infoModal) infoModal.classList.add("hidden");
+    });
+
+    inputModeBtn.addEventListener("click", () => {
+      if (!state.started || state.submitted) return;
+
+      state.inputMode =
+        state.inputMode === INPUT_MODE.DROPDOWN ? INPUT_MODE.KEYBOARD : INPUT_MODE.DROPDOWN;
+
+      syncInputModeBtnText();
+      updateKeyboardModeHint();
+      renderQuiz();
     });
 
     downloadTaskBtn.addEventListener("click", downloadTaskSheetPdf);
