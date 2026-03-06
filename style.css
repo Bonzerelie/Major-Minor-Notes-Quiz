@@ -357,16 +357,6 @@ button:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
 }
 
 /* Modal */
-.modal{
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: rgba(0,0,0,.55);
-  z-index: 1000;
-  padding: 18px;
-}
-.modal.hidden{ display:none; }
 .modal {
   position: absolute; 
   top: 0; left: 0; right: 0; 
@@ -380,6 +370,16 @@ button:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
   padding-right: 10px;
   padding-bottom: 40px; /* Adds a nice buffer at the bottom of the page */
   z-index: 50; 
+}
+.modal.hidden{ display:none; }
+.modalCard{
+  text-align:center;
+  width: min(720px, calc(100vw - 32px));
+  border-radius: 16px;
+  background:#fff;
+  color:#2b2b2b;
+  padding: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
 }
 .modalHeader h2{ margin: 0; }
 .modalBody{ margin-top: 10px; line-height: 1.5; }
