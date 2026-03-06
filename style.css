@@ -367,14 +367,19 @@ button:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
   padding: 18px;
 }
 .modal.hidden{ display:none; }
-.modalCard{
-  text-align:center;
-  width: min(720px, calc(100vw - 32px));
-  border-radius: 16px;
-  background:#fff;
-  color:#2b2b2b;
-  padding: 16px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+.modal {
+  position: absolute; 
+  top: 0; left: 0; right: 0; 
+  min-height: 100%; /* Better than bottom: 0 for absolute full-page overlays */
+  background: rgba(0,0,0,.45);
+  display: flex; 
+  align-items: flex-start; /* Keeps the card anchored to the top */
+  justify-content: center;
+  padding-top: 100px; /* Changed from 60px to 100px */
+  padding-left: 10px; 
+  padding-right: 10px;
+  padding-bottom: 40px; /* Adds a nice buffer at the bottom of the page */
+  z-index: 50; 
 }
 .modalHeader h2{ margin: 0; }
 .modalBody{ margin-top: 10px; line-height: 1.5; }
