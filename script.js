@@ -1,10 +1,4 @@
-/* /script.js
-   Changes:
-   - Added input mode toggle (Dropdown / Keyboard per question).
-   - Keyboard mode: 2-octave selectable keyboard per question + "Hear selection".
-   - Task sheet PDF now prints 2-octave blank keyboards per question with white-filled black keys.
-   - Top reference keyboard now starts at C3 and spans 3 octaves (C3..B5).
-*/
+/* /script.js */
 (() => {
   "use strict";
 
@@ -13,45 +7,33 @@
   const FADE_OUT_SEC = 0.12;
   const LIMITER_THRESHOLD_DB = -6;
 
-  // Reference keyboard at top: 3 octaves from C3..B5 (no C6+)
+  // Reference keyboard at top
   const KBD_START_OCT = 3;
   const KBD_OCTAVES = 3;
 
-  // Mini keyboards (results): 3 octaves C3..B5
+  // Mini keyboards (results) - reduced to 2 to match other games
   const MINI_KBD_START_OCT = 3;
-  const MINI_KBD_OCTAVES = 3;
+  const MINI_KBD_OCTAVES = 2;
   const MINI_KBD_INCLUDE_END_C = true;
 
-  // Per-question input keyboard (new mode): 2 octaves (space-friendly)
-  const Q_KBD_START_OCT = 3; // C3
-  const Q_KBD_OCTAVES = 3;   // C3..B5 (+ final C)
+  // Per-question input keyboard - reduced to 2 for larger keys
+  const Q_KBD_START_OCT = 3; 
+  const Q_KBD_OCTAVES = 2;   
   const Q_KBD_INCLUDE_END_C = true;
 
-  // Task sheet printed keyboards: 2 octaves and colourable black keys
-  const TASK_KBD_START_OCT = 3; // C3
-  const TASK_KBD_OCTAVES = 3;
+  // Task sheet printed keyboards - reduced to 2
+  const TASK_KBD_START_OCT = 3; 
+  const TASK_KBD_OCTAVES = 2;
   const TASK_KBD_INCLUDE_END_C = true;
 
-  // Task sheet questions per page (keyboards are larger than lines)
-  const TASK_Q_PER_PAGE_KBD = 12;
-  const TASK_Q_PER_PAGE_DROPDOWN = 24;
+  const TASK_Q_PER_PAGE_KBD = 10;
+  const TASK_Q_PER_PAGE_DROPDOWN = 18;
 
-  // PDF margins (pt)
   const PDF_MARGIN_PT = 18;
 
   const PC_TO_STEM = {
-    0: "c",
-    1: "csharp",
-    2: "d",
-    3: "dsharp",
-    4: "e",
-    5: "f",
-    6: "fsharp",
-    7: "g",
-    8: "gsharp",
-    9: "a",
-    10: "asharp",
-    11: "b",
+    0: "c", 1: "csharp", 2: "d", 3: "dsharp", 4: "e", 5: "f",
+    6: "fsharp", 7: "g", 8: "gsharp", 9: "a", 10: "asharp", 11: "b",
   };
 
   const PC_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -59,18 +41,9 @@
   const ACC_PCS = new Set([1, 3, 6, 8, 10]);
 
   const NOTE_OPTIONS = [
-    { pc: 0, label: "C" },
-    { pc: 1, label: "C#/Db" },
-    { pc: 2, label: "D" },
-    { pc: 3, label: "D#/Eb" },
-    { pc: 4, label: "E" },
-    { pc: 5, label: "F" },
-    { pc: 6, label: "F#/Gb" },
-    { pc: 7, label: "G" },
-    { pc: 8, label: "G#/Ab" },
-    { pc: 9, label: "A" },
-    { pc: 10, label: "A#/Bb" },
-    { pc: 11, label: "B" },
+    { pc: 0, label: "C" }, { pc: 1, label: "C#/Db" }, { pc: 2, label: "D" }, { pc: 3, label: "D#/Eb" },
+    { pc: 4, label: "E" }, { pc: 5, label: "F" }, { pc: 6, label: "F#/Gb" }, { pc: 7, label: "G" },
+    { pc: 8, label: "G#/Ab" }, { pc: 9, label: "A" }, { pc: 10, label: "A#/Bb" }, { pc: 11, label: "B" },
   ];
 
   const INPUT_MODE = {
@@ -119,7 +92,11 @@
   const bufferPromiseCache = new Map();
   const activeVoices = new Set();
 
-  // --- Iframe height reporting (postMessage) ---
+  function playUiSound(filename) {
+    const audio = new Audio(`${AUDIO_DIR}/${filename}`);
+    audio.play().catch(() => {});
+  }
+
   function postHeightToParent(height) {
     if (window.parent === window) return;
     const TARGET_ORIGIN = "*";
@@ -138,11 +115,8 @@
     const de = document.documentElement;
     const body = document.body;
     return Math.max(
-      body?.scrollHeight ?? 0,
-      body?.offsetHeight ?? 0,
-      de?.clientHeight ?? 0,
-      de?.scrollHeight ?? 0,
-      de?.offsetHeight ?? 0
+      body?.scrollHeight ?? 0, body?.offsetHeight ?? 0,
+      de?.clientHeight ?? 0, de?.scrollHeight ?? 0, de?.offsetHeight ?? 0
     );
   }
 
@@ -150,18 +124,11 @@
     const send = () => postHeightToParent(measureDocHeightPx());
     send();
     window.addEventListener("load", send, { passive: true });
-
     const ro = new ResizeObserver(() => send());
     const appRoot = document.getElementById("appRoot") || document.body;
     if (appRoot) ro.observe(appRoot);
-
     const mo = new MutationObserver(() => send());
-    mo.observe(appRoot || document.body, {
-      attributes: true,
-      childList: true,
-      subtree: true,
-    });
-
+    mo.observe(appRoot || document.body, { attributes: true, childList: true, subtree: true });
     window.__triadsSendHeight = send;
   }
 
@@ -172,18 +139,15 @@
       alert("Your browser doesn’t support Web Audio (required for playback).");
       return null;
     }
-
     audioCtx = new Ctx();
     masterGain = audioCtx.createGain();
     masterGain.gain.value = 0.9;
-
     limiter = audioCtx.createDynamicsCompressor();
     limiter.threshold.value = LIMITER_THRESHOLD_DB;
     limiter.knee.value = 0;
     limiter.ratio.value = 20;
     limiter.attack.value = 0.001;
     limiter.release.value = 0.12;
-
     masterGain.connect(limiter);
     limiter.connect(audioCtx.destination);
     return audioCtx;
@@ -193,19 +157,15 @@
     const ctx = ensureAudioGraph();
     if (!ctx) return;
     if (ctx.state === "suspended") {
-      try {
-        await ctx.resume();
-      } catch {}
+      try { await ctx.resume(); } catch {}
     }
   }
 
   function stopAllNotes(fadeSec = 0.06) {
     const ctx = ensureAudioGraph();
     if (!ctx) return;
-
     const now = ctx.currentTime;
     const fade = Math.max(0.02, Number.isFinite(fadeSec) ? fadeSec : 0.06);
-
     for (const v of Array.from(activeVoices)) {
       try {
         v.gain.gain.cancelScheduledValues(now);
@@ -229,7 +189,6 @@
 
   function loadBuffer(url) {
     if (bufferPromiseCache.has(url)) return bufferPromiseCache.get(url);
-
     const p = (async () => {
       const ctx = ensureAudioGraph();
       if (!ctx) return null;
@@ -242,7 +201,6 @@
         return null;
       }
     })();
-
     bufferPromiseCache.set(url, p);
     return p;
   }
@@ -250,51 +208,37 @@
   function playBufferWindowed(buffer, whenSec, playSec, fadeOutSec, gain = 1) {
     const ctx = ensureAudioGraph();
     if (!ctx || !masterGain) return null;
-
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-
     const g = ctx.createGain();
     const safeGain = Math.max(0, Number.isFinite(gain) ? gain : 1);
-
     const fadeIn = 0.01;
     const endAt = whenSec + Math.max(0.05, playSec);
-
     g.gain.setValueAtTime(0, whenSec);
     g.gain.linearRampToValueAtTime(safeGain, whenSec + fadeIn);
-
     const fadeStart = Math.max(whenSec + 0.02, endAt - Math.max(0.06, fadeOutSec));
     g.gain.setValueAtTime(safeGain, fadeStart);
     g.gain.linearRampToValueAtTime(0, endAt);
-
     src.connect(g);
     g.connect(masterGain);
-
     trackVoice(src, g, whenSec);
     src.start(whenSec);
     src.stop(endAt + 0.03);
     return src;
   }
 
-  function pcFromPitch(p) {
-    return ((p % 12) + 12) % 12;
-  }
-  function octFromPitch(p) {
-    return Math.floor(p / 12);
-  }
-  function pitchFromPcOct(pc, oct) {
-    return oct * 12 + pc;
-  }
-  
+  function pcFromPitch(p) { return ((p % 12) + 12) % 12; }
+  function octFromPitch(p) { return Math.floor(p / 12); }
+  function pitchFromPcOct(pc, oct) { return oct * 12 + pc; }
 
-function rangeHiPitch(startPitch, octaves, includeEndC = false) {
-  const totalSemis = Math.max(0, Math.round(octaves)) * 12;
-  let hi = startPitch + totalSemis - 1;
-  if (includeEndC && pcFromPitch(startPitch) === 0) hi += 1; // include the final C
-  return hi;
-}
+  function rangeHiPitch(startPitch, octaves, includeEndC = false) {
+    const totalSemis = Math.max(0, Math.round(octaves)) * 12;
+    let hi = startPitch + totalSemis - 1;
+    if (includeEndC && pcFromPitch(startPitch) === 0) hi += 1; 
+    return hi;
+  }
 
-function getStemForPc(pc) {
+  function getStemForPc(pc) {
     return PC_TO_STEM[(pc + 12) % 12] || null;
   }
 
@@ -303,7 +247,6 @@ function getStemForPc(pc) {
     const oct = octFromPitch(pitch);
     const stem = getStemForPc(pc);
     if (!stem) return { missingUrl: null, buffer: null };
-
     const url = noteUrl(stem, oct);
     const buf = await loadBuffer(url);
     if (!buf) return { missingUrl: url, buffer: null };
@@ -314,7 +257,6 @@ function getStemForPc(pc) {
     await resumeAudioIfNeeded();
     const ctx = ensureAudioGraph();
     if (!ctx) return false;
-
     const whenSec = ctx.currentTime + 0.03;
     const results = await Promise.all(pitches.map(loadPitchBuffer));
     const missing = results.find((r) => r?.missingUrl);
@@ -322,10 +264,8 @@ function getStemForPc(pc) {
       alert(`Missing audio sample: ${missing.missingUrl}`);
       return false;
     }
-
     const bufs = results.map((r) => r?.buffer).filter(Boolean);
     if (!bufs.length) return false;
-
     const perNoteGain = 0.8 / Math.max(1, bufs.length);
     for (const b of bufs) playBufferWindowed(b, whenSec, playSec, FADE_OUT_SEC, perNoteGain);
     return true;
@@ -379,9 +319,9 @@ function getStemForPc(pc) {
     heightPx = 190,
     interactive = true,
     ariaLabel = "Keyboard",
-    highlight = null, // Map<pitch, "hit"|"ok"|"bad">
+    highlight = null, 
     onKeyDown = null,
-    theme = null, // { blackFill, whiteFill, blackStroke, whiteStroke, frameFill }
+    theme = null, 
   }) {
     const lo = startPitch;
     const hi = rangeHiPitch(startPitch, octaves, includeEndC);
@@ -412,12 +352,10 @@ function getStemForPc(pc) {
     const outerH = WHITE_H + BORDER * 2;
 
     const svg = svgEl("svg", {
-      width: outerW,
-height: outerH,
+      width: outerW, height: outerH,
       viewBox: `0 0 ${outerW} ${outerH}`,
       preserveAspectRatio: "xMidYMid meet",
-      role: "img",
-      "aria-label": ariaLabel,
+      role: "img", "aria-label": ariaLabel,
     });
 
     const style = svgEl("style");
@@ -429,18 +367,13 @@ height: outerH,
       .hit rect { fill: var(--kbdHit) !important; }
       .hitOk rect { fill: var(--kbdHitOk) !important; }
       .hitBad rect { fill: var(--kbdHitBad) !important; }
+      .printHit rect { fill: #d4d4d4 !important; }
     `;
     svg.appendChild(style);
 
     svg.appendChild(
       svgEl("rect", {
-        x: BORDER / 2,
-        y: BORDER / 2,
-        width: outerW - BORDER,
-        height: outerH - BORDER,
-        rx: RADIUS,
-        ry: RADIUS,
-        class: "frame",
+        x: BORDER / 2, y: BORDER / 2, width: outerW - BORDER, height: outerH - BORDER, rx: RADIUS, ry: RADIUS, class: "frame",
       })
     );
 
@@ -461,60 +394,37 @@ height: outerH,
       if (!c) return base;
       if (c === "ok") return `${base} hitOk`;
       if (c === "bad") return `${base} hitBad`;
+      if (c === "printHit") return `${base} printHit`;
       return `${base} hit`;
     }
 
-    // White keys
     for (let i = 0; i < whitePitches.length; i++) {
       const p = whitePitches[i];
       const x = startX + i * WHITE_W;
-
-      const grp = svgEl("g", {
-        class: `${classForPitch(p, "w")} key`,
-        "data-pitch": String(p),
-        tabindex: interactive ? "0" : "-1",
-      });
-
+      const grp = svgEl("g", { class: `${classForPitch(p, "w")} key`, "data-pitch": String(p), tabindex: interactive ? "0" : "-1" });
       grp.appendChild(svgEl("rect", { x, y: startY, width: WHITE_W, height: WHITE_H }));
       if (interactive && typeof onKeyDown === "function") {
-        grp.addEventListener("pointerdown", (e) => {
-          e.preventDefault();
-          onKeyDown(p, grp);
-        });
+        grp.addEventListener("pointerdown", (e) => { e.preventDefault(); onKeyDown(p, grp); });
       }
       gW.appendChild(grp);
     }
 
-    // Black keys
     const leftPcByBlack = { 1: 0, 3: 2, 6: 5, 8: 7, 10: 9 };
     for (let p = lo; p <= hi; p++) {
       const pc = pcFromPitch(p);
       if (!ACC_PCS.has(pc)) continue;
-
       const leftPc = leftPcByBlack[pc];
       if (leftPc == null) continue;
-
       const oct = octFromPitch(p);
       const leftWhitePitch = pitchFromPcOct(leftPc, oct);
-
       const wi = whiteIndexByPitch.get(leftWhitePitch);
       if (wi == null) continue;
-
       const leftX = startX + wi * WHITE_W;
       const x = leftX + WHITE_W - BLACK_W / 2;
-
-      const grp = svgEl("g", {
-        class: `${classForPitch(p, "b")} key`,
-        "data-pitch": String(p),
-        tabindex: interactive ? "0" : "-1",
-      });
+      const grp = svgEl("g", { class: `${classForPitch(p, "b")} key`, "data-pitch": String(p), tabindex: interactive ? "0" : "-1" });
       grp.appendChild(svgEl("rect", { x, y: startY, width: BLACK_W, height: BLACK_H }));
-
       if (interactive && typeof onKeyDown === "function") {
-        grp.addEventListener("pointerdown", (e) => {
-          e.preventDefault();
-          onKeyDown(p, grp);
-        });
+        grp.addEventListener("pointerdown", (e) => { e.preventDefault(); onKeyDown(p, grp); });
       }
       gB.appendChild(grp);
     }
@@ -527,26 +437,6 @@ height: outerH,
     groupEl.classList.add("hit");
     window.setTimeout(() => groupEl.classList.remove("hit"), ms);
   }
-
-  function buildPcHighlightMapForRange({ startPitch, octaves, includeEndC = false, selectedPcs, okBadMap = null }) {
-    const lo = startPitch;
-    const hi = rangeHiPitch(startPitch, octaves, includeEndC);
-
-    const pcs = (selectedPcs || []).filter((v) => v != null).map((v) => ((v % 12) + 12) % 12);
-    if (!pcs.length && !okBadMap) return null;
-
-    const map = new Map();
-    for (let p = lo; p <= hi; p++) {
-      const pc = pcFromPitch(p);
-      if (okBadMap?.has(p)) {
-        map.set(p, okBadMap.get(p));
-      } else if (pcs.includes(pc)) {
-        map.set(p, "hit");
-      }
-    }
-    return map;
-  }
-
 
   function buildPitchHighlightMapForRange({ startPitch, octaves, includeEndC = false, selectedPitches, okBadMap = null }) {
     const lo = startPitch;
@@ -570,7 +460,6 @@ height: outerH,
     return map;
   }
 
-  // -------------------- Root-position pitch helpers (mini keyboards + playback) --------------------
   function nextPitchAtOrAbove(pc, minPitch) {
     const want = ((pc % 12) + 12) % 12;
     let p = Math.max(0, Math.floor(minPitch));
@@ -578,14 +467,14 @@ height: outerH,
     return p;
   }
 
-  function triadRootPositionPitches(rootPc, quality, rootOct = 4) {
+  function triadRootPositionPitches(rootPc, quality, rootOct = 3) {
     const rootPitch = pitchFromPcOct(rootPc, rootOct);
     const thirdPitch = rootPitch + (quality === "major" ? 4 : 3);
     const fifthPitch = rootPitch + 7;
     return [rootPitch, thirdPitch, fifthPitch];
   }
 
-  function answeredRootPositionPitches(userPcs, rootOct = 4) {
+  function answeredRootPositionPitches(userPcs, rootOct = 3) {
     const [p0, p1, p2] = userPcs;
     if (p0 == null && p1 == null && p2 == null) return [];
 
@@ -601,13 +490,8 @@ height: outerH,
 
   // -------------------- Game state --------------------
   const state = {
-    started: false,
-    submitted: false,
-    questions: [],
-    questionCount: 10,
-    createdOn: null,
-    createdOnText: "",
-    inputMode: INPUT_MODE.DROPDOWN,
+    started: false, submitted: false, questions: [], questionCount: 10,
+    createdOn: null, createdOnText: "", inputMode: INPUT_MODE.DROPDOWN,
   };
 
   function clampQuestions(n) {
@@ -618,7 +502,6 @@ height: outerH,
 
   function generateQuestions(count) {
     const target = clampQuestions(count);
-
     const pool = [];
     for (let rootPc = 0; rootPc < 12; rootPc++) {
       pool.push({ rootPc, quality: "major" });
@@ -636,69 +519,33 @@ height: outerH,
     }
 
     return picked.map((q, idx) => ({
-      id: `q${idx + 1}`,
-      rootPc: q.rootPc,
-      quality: q.quality,
-      correctPcs: triadPcs(q.rootPc, q.quality),
-      userPcs: [null, null, null],
-      activeIdx: 0,
-      marks: 0,
-      selectedPitches: [],
-      octaveError: false,
+      id: `q${idx + 1}`, rootPc: q.rootPc, quality: q.quality,
+      correctPcs: triadPcs(q.rootPc, q.quality), userPcs: [null, null, null],
+      activeIdx: 0, marks: 0, selectedPitches: [], octaveError: false,
     }));
   }
 
   function resetGameToInitial() {
     stopAllNotes(0.08);
-
-    state.started = false;
-    state.submitted = false;
-    state.questions = [];
-    state.createdOn = null;
-    state.createdOnText = "";
-    state.inputMode = INPUT_MODE.DROPDOWN;
-
+    state.started = false; state.submitted = false; state.questions = [];
+    state.createdOn = null; state.createdOnText = ""; state.inputMode = INPUT_MODE.DROPDOWN;
     questionsList.innerHTML = "";
     resultsPanel.classList.add("hidden");
     resultsSummary.textContent = "—";
-
-    submitBtn.disabled = true;
-    downloadTaskBtn.disabled = true;
-    downloadScorecardBtn.disabled = true;
-    resetBtn.disabled = true;
-
-    quizMeta.textContent = "";
-    beginModal.classList.remove("hidden");
-
-    inputModeBtn.disabled = true;
-    inputModeBtn.textContent = "Input mode: Dropdown";
-
-    updateKeyboardModeHint();
-    updatePageAdvice();
+    submitBtn.disabled = true; downloadTaskBtn.disabled = true; downloadScorecardBtn.disabled = true; resetBtn.disabled = true;
+    quizMeta.textContent = ""; beginModal.classList.remove("hidden");
+    inputModeBtn.disabled = true; inputModeBtn.textContent = "Input mode: Dropdown";
+    updateKeyboardModeHint(); updatePageAdvice();
   }
 
   function startGame() {
-    state.started = true;
-    state.submitted = false;
-    state.questions = generateQuestions(state.questionCount);
-
-    state.createdOn = new Date();
-    state.createdOnText = state.createdOn.toLocaleDateString("en-GB");
-
+    state.started = true; state.submitted = false; state.questions = generateQuestions(state.questionCount);
+    state.createdOn = new Date(); state.createdOnText = state.createdOn.toLocaleDateString("en-GB");
     renderQuiz();
-
-    submitBtn.disabled = false;
-    downloadTaskBtn.disabled = false;
-    downloadScorecardBtn.disabled = true;
-    resetBtn.disabled = false;
-
-    inputModeBtn.disabled = false;
-    syncInputModeBtnText();
-    updateKeyboardModeHint();
-
+    submitBtn.disabled = false; downloadTaskBtn.disabled = false; downloadScorecardBtn.disabled = true; resetBtn.disabled = false;
+    inputModeBtn.disabled = false; syncInputModeBtnText(); updateKeyboardModeHint();
     beginModal.classList.add("hidden");
   }
-
 
   function updateKeyboardModeHint() {
     if (!kbdModeHint) return;
@@ -707,14 +554,11 @@ height: outerH,
   }
 
   function syncInputModeBtnText() {
-    inputModeBtn.textContent =
-      state.inputMode === INPUT_MODE.KEYBOARD ? "Input mode: Keyboard" : "Input mode: Dropdown";
+    inputModeBtn.textContent = state.inputMode === INPUT_MODE.KEYBOARD ? "Input mode: Keyboard" : "Input mode: Dropdown";
   }
 
-  // -------------------- Begin modal question-count logic --------------------
   function chunkArray(arr, size) {
-    const out = [];
-    const n = Math.max(1, Math.floor(size));
+    const out = []; const n = Math.max(1, Math.floor(size));
     for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
     return out;
   }
@@ -722,35 +566,19 @@ height: outerH,
   function updatePageAdvice() {
     const qCount = clampQuestions(Number(questionCountSelect?.value ?? 10));
     state.questionCount = qCount;
-
-    const perPageLimit =
-      state.inputMode === INPUT_MODE.KEYBOARD ? TASK_Q_PER_PAGE_KBD : TASK_Q_PER_PAGE_DROPDOWN;
-
+    const perPageLimit = state.inputMode === INPUT_MODE.KEYBOARD ? TASK_Q_PER_PAGE_KBD : TASK_Q_PER_PAGE_DROPDOWN;
     const pages = Math.ceil(qCount / perPageLimit);
-    const perPage =
-      qCount <= perPageLimit
-        ? `${qCount} on 1 page`
-        : `${perPageLimit} per page (last page ${qCount % perPageLimit || perPageLimit})`;
-
-    if (pageAdvice) {
-      pageAdvice.textContent = `PDF tip: ${qCount} questions → ${pages} A4 page(s), ${perPage}.`;
-    }
+    const perPage = qCount <= perPageLimit ? `${qCount} on 1 page` : `${perPageLimit} per page (last page ${qCount % perPageLimit || perPageLimit})`;
+    if (pageAdvice) pageAdvice.textContent = `PDF tip: ${qCount} questions → ${pages} A4 page(s), ${perPage}.`;
   }
 
   // -------------------- Rendering --------------------
   function buildNoteSelect(selectId) {
-    const sel = document.createElement("select");
-    sel.id = selectId;
-
-    const opt0 = document.createElement("option");
-    opt0.value = "";
-    opt0.textContent = "— select —";
+    const sel = document.createElement("select"); sel.id = selectId;
+    const opt0 = document.createElement("option"); opt0.value = ""; opt0.textContent = "— select —";
     sel.appendChild(opt0);
-
     for (const opt of NOTE_OPTIONS) {
-      const o = document.createElement("option");
-      o.value = String(opt.pc);
-      o.textContent = opt.label;
+      const o = document.createElement("option"); o.value = String(opt.pc); o.textContent = opt.label;
       sel.appendChild(o);
     }
     return sel;
@@ -761,98 +589,54 @@ height: outerH,
     q.activeIdx = 0;
   }
 
-
   function updateQuestionFromSelectedPitches(q) {
     const pitches = Array.isArray(q.selectedPitches) ? q.selectedPitches.slice() : [];
     pitches.sort((a, b) => a - b);
-
     q.selectedPitches = pitches;
-
     const pcs = pitches.map((p) => pcFromPitch(p));
     q.userPcs = [null, null, null];
-
     if (pcs.length >= 1) q.userPcs[0] = pcs[0];
     if (pcs.length >= 2) q.userPcs[1] = pcs[1];
     if (pcs.length >= 3) q.userPcs[2] = pcs[2];
-
-    if (pitches.length >= 2) {
-      q.octaveError = pitches[pitches.length - 1] - pitches[0] > 11;
-    } else {
-      q.octaveError = false;
-    }
+    q.octaveError = pitches.length >= 2 ? (pitches[pitches.length - 1] - pitches[0] > 11) : false;
   }
 
   function renderKeyboardInputForQuestion(q, li) {
     updateQuestionFromSelectedPitches(q);
-
-    const wrap = document.createElement("div");
-    wrap.className = "qKbdWrap";
-
-    const slots = document.createElement("div");
-    slots.className = "qSlots";
+    const wrap = document.createElement("div"); wrap.className = "qKbdWrap";
+    const slots = document.createElement("div"); slots.className = "qSlots";
 
     const labels = ["1st (root)", "3rd", "5th"];
     labels.forEach((lab, idx) => {
-      const s = document.createElement("div");
-      s.className = "qSlot";
-      s.dataset.slot = String(idx);
-
-      const l = document.createElement("div");
-      l.className = "qSlotLabel";
-      l.textContent = lab;
-
-      const v = document.createElement("div");
-      v.className = "qSlotValue";
-      v.id = `${q.id}-slot-${idx}`;
+      const s = document.createElement("div"); s.className = "qSlot"; s.dataset.slot = String(idx);
+      const l = document.createElement("div"); l.className = "qSlotLabel"; l.textContent = lab;
+      const v = document.createElement("div"); v.className = "qSlotValue"; v.id = `${q.id}-slot-${idx}`;
       v.textContent = q.userPcs[idx] == null ? "—" : noteLabelForPc(q.userPcs[idx]);
-
-      s.appendChild(l);
-      s.appendChild(v);
-      slots.appendChild(s);
+      s.appendChild(l); s.appendChild(v); slots.appendChild(s);
     });
 
-    const mount = document.createElement("div");
-    mount.className = "qKbdMount mount";
-    mount.id = `${q.id}-kbd-mount`;
-
-    const btnRow = document.createElement("div");
-    btnRow.className = "qSlotBtnRow";
-    btnRow.id = `${q.id}-kbd-actions`;
+    const mount = document.createElement("div"); mount.className = "qKbdMount mount"; mount.id = `${q.id}-kbd-mount`;
+    const btnRow = document.createElement("div"); btnRow.className = "qSlotBtnRow"; btnRow.id = `${q.id}-kbd-actions`;
 
     const hearBtn = document.createElement("button");
-    hearBtn.type = "button";
-    hearBtn.textContent = "Hear selection";
-    hearBtn.disabled = state.submitted;
+    hearBtn.type = "button"; hearBtn.textContent = "Hear selection"; hearBtn.disabled = state.submitted;
     hearBtn.addEventListener("click", async () => {
-      await resumeAudioIfNeeded();
-      stopAllNotes(0.02);
-
+      await resumeAudioIfNeeded(); stopAllNotes(0.02);
       const pitches = (q.selectedPitches || []).slice().sort((a,b)=>a-b);
       if (!pitches.length) return;
       await playPitchesWindowed(pitches, 1.2);
     });
 
     const clearBtn = document.createElement("button");
-    clearBtn.type = "button";
-    clearBtn.textContent = "Clear";
-    clearBtn.disabled = state.submitted;
+    clearBtn.type = "button"; clearBtn.textContent = "Clear"; clearBtn.disabled = state.submitted;
     clearBtn.addEventListener("click", () => {
       if (state.submitted) return;
-      clearQuestionAnswer(q);
-      updateQuestionFromSelectedPitches(q);
-      renderQuestionKeyboardMount(q);
-      renderKeyboardSlotValues(q);
+      clearQuestionAnswer(q); updateQuestionFromSelectedPitches(q); renderQuestionKeyboardMount(q); renderKeyboardSlotValues(q);
     });
 
-    btnRow.appendChild(hearBtn);
-    btnRow.appendChild(clearBtn);
-
-    wrap.appendChild(slots);
-    wrap.appendChild(mount);
-    wrap.appendChild(btnRow);
-
+    btnRow.appendChild(hearBtn); btnRow.appendChild(clearBtn);
+    wrap.appendChild(slots); wrap.appendChild(mount); wrap.appendChild(btnRow);
     li.appendChild(wrap);
-
     renderQuestionKeyboardMount(q, mount);
   }
 
@@ -866,193 +650,101 @@ height: outerH,
   function renderQuestionKeyboardMount(q, mountEl = null) {
     const mount = mountEl || $(`${q.id}-kbd-mount`);
     if (!mount) return;
-
     const startPitch = pitchFromPcOct(0, Q_KBD_START_OCT);
     const hl = buildPitchHighlightMapForRange({
-      startPitch,
-      octaves: Q_KBD_OCTAVES,
-      includeEndC: Q_KBD_INCLUDE_END_C,
-      selectedPitches: q.selectedPitches,
+      startPitch, octaves: Q_KBD_OCTAVES, includeEndC: Q_KBD_INCLUDE_END_C, selectedPitches: q.selectedPitches,
     });
 
     mount.innerHTML = "";
     mount.appendChild(
       buildKeyboardSvg({
-        startPitch,
-        octaves: Q_KBD_OCTAVES,
-        includeEndC: Q_KBD_INCLUDE_END_C,
-        widthPx: 880,
-        heightPx: 165,
-        interactive: !state.submitted,
-        ariaLabel: "Question keyboard",
-        highlight: hl,
+        startPitch, octaves: Q_KBD_OCTAVES, includeEndC: Q_KBD_INCLUDE_END_C,
+        widthPx: 880, heightPx: 165, interactive: !state.submitted, ariaLabel: "Question keyboard", highlight: hl,
         onKeyDown: async (pitch, groupEl) => {
-      if (state.submitted) return;
-
-      await resumeAudioIfNeeded();
-      stopAllNotes(0.02);
-      await playPitchesWindowed([pitch], 0.7);
-      flashKeyGroup(groupEl, 180);
-
-      q.selectedPitches = Array.isArray(q.selectedPitches) ? q.selectedPitches : [];
-      const p = Math.round(pitch);
-
-      const idx = q.selectedPitches.indexOf(p);
-      if (idx >= 0) {
-        q.selectedPitches.splice(idx, 1);
-      } else {
-        if (q.selectedPitches.length >= 3) return;
-        q.selectedPitches.push(p);
-      }
-
-      updateQuestionFromSelectedPitches(q);
-      renderKeyboardSlotValues(q);
-      renderQuestionKeyboardMount(q);
-    },
+          if (state.submitted) return;
+          await resumeAudioIfNeeded(); stopAllNotes(0.02); await playPitchesWindowed([pitch], 0.7); flashKeyGroup(groupEl, 180);
+          q.selectedPitches = Array.isArray(q.selectedPitches) ? q.selectedPitches : [];
+          const p = Math.round(pitch);
+          const idx = q.selectedPitches.indexOf(p);
+          if (idx >= 0) q.selectedPitches.splice(idx, 1);
+          else { if (q.selectedPitches.length >= 3) return; q.selectedPitches.push(p); }
+          updateQuestionFromSelectedPitches(q); renderKeyboardSlotValues(q); renderQuestionKeyboardMount(q);
+        },
       })
     );
   }
 
   function renderQuiz() {
-    questionsList.innerHTML = "";
-    quizMeta.textContent = "";
-
+    questionsList.innerHTML = ""; quizMeta.textContent = "";
     state.questions.forEach((q, index) => {
-      const li = document.createElement("li");
-      li.className = "qCard";
-      li.dataset.qid = q.id;
-
-      const top = document.createElement("div");
-      top.className = "qTop";
-
-      const title = document.createElement("div");
-      title.className = "qTitle";
+      const li = document.createElement("li"); li.className = "qCard"; li.dataset.qid = q.id;
+      const top = document.createElement("div"); top.className = "qTop";
+      const title = document.createElement("div"); title.className = "qTitle";
       title.textContent = `${index + 1}. ${chordName(q.rootPc, q.quality)}`;
-
-      const marks = document.createElement("div");
-      marks.className = "qMarks";
-      marks.id = `${q.id}-marks`;
-      marks.textContent = "0 / 3";
-
-      top.appendChild(title);
-      top.appendChild(marks);
-      li.appendChild(top);
+      const marks = document.createElement("div"); marks.className = "qMarks"; marks.id = `${q.id}-marks`; marks.textContent = "0 / 3";
+      top.appendChild(title); top.appendChild(marks); li.appendChild(top);
 
       if (state.inputMode === INPUT_MODE.DROPDOWN) {
-        const grid = document.createElement("div");
-        grid.className = "qGrid";
-
-        const fields = [
-          { label: "1st (root)", idx: 0 },
-          { label: "3rd", idx: 1 },
-          { label: "5th", idx: 2 },
-        ];
-
+        const grid = document.createElement("div"); grid.className = "qGrid";
+        const fields = [{ label: "1st (root)", idx: 0 }, { label: "3rd", idx: 1 }, { label: "5th", idx: 2 }];
         for (const f of fields) {
-          const wrap = document.createElement("div");
-          wrap.className = "qField";
-
-          const lab = document.createElement("label");
-          lab.setAttribute("for", `${q.id}-sel-${f.idx}`);
-          lab.textContent = f.label;
-
+          const wrap = document.createElement("div"); wrap.className = "qField";
+          const lab = document.createElement("label"); lab.setAttribute("for", `${q.id}-sel-${f.idx}`); lab.textContent = f.label;
           const sel = buildNoteSelect(`${q.id}-sel-${f.idx}`);
-          sel.value = q.userPcs[f.idx] == null ? "" : String(q.userPcs[f.idx]);
-          sel.disabled = state.submitted;
-
-          sel.addEventListener("change", () => {
-            q.userPcs[f.idx] = sel.value === "" ? null : Number(sel.value);
-          });
-
-          wrap.appendChild(lab);
-          wrap.appendChild(sel);
-          grid.appendChild(wrap);
+          sel.value = q.userPcs[f.idx] == null ? "" : String(q.userPcs[f.idx]); sel.disabled = state.submitted;
+          sel.addEventListener("change", () => q.userPcs[f.idx] = sel.value === "" ? null : Number(sel.value));
+          wrap.appendChild(lab); wrap.appendChild(sel); grid.appendChild(wrap);
         }
-
         li.appendChild(grid);
       } else {
         renderKeyboardInputForQuestion(q, li);
       }
 
-      const feedback = document.createElement("div");
-      feedback.className = "qFeedback hidden";
-      feedback.id = `${q.id}-feedback`;
-      li.appendChild(feedback);
-
-      questionsList.appendChild(li);
+      const feedback = document.createElement("div"); feedback.className = "qFeedback hidden"; feedback.id = `${q.id}-feedback`;
+      li.appendChild(feedback); questionsList.appendChild(li);
     });
-
     window.__triadsSendHeight?.();
   }
 
   function setSelectDisabledAll(disabled) {
-    const sels = questionsList.querySelectorAll("select");
-    sels.forEach((s) => {
-      s.disabled = disabled;
-    });
+    questionsList.querySelectorAll("select").forEach((s) => s.disabled = disabled);
   }
 
-  // -------------------- Mini keyboards per question (results) --------------------
   function makeMiniKeyboardBlock({ title, mountId, btnText, onPlay }) {
-    const block = document.createElement("div");
-    block.className = "miniKbdBlock";
-
-    const t = document.createElement("div");
-    t.className = "miniKbdTitle";
-    t.textContent = title;
-
-    const mount = document.createElement("div");
-    mount.className = "mount miniMount";
-    mount.id = mountId;
-
-    const btnRow = document.createElement("div");
-    btnRow.className = "miniBtnRow";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = btnText;
+    const block = document.createElement("div"); block.className = "miniKbdBlock";
+    const t = document.createElement("div"); t.className = "miniKbdTitle"; t.textContent = title;
+    const mount = document.createElement("div"); mount.className = "mount miniMount"; mount.id = mountId;
+    const btnRow = document.createElement("div"); btnRow.className = "miniBtnRow";
+    const btn = document.createElement("button"); btn.type = "button"; btn.textContent = btnText;
     btn.addEventListener("click", onPlay);
-    btnRow.appendChild(btn);
-
-    block.appendChild(t);
-    block.appendChild(mount);
-    block.appendChild(btnRow);
+    btnRow.appendChild(btn); block.appendChild(t); block.appendChild(mount); block.appendChild(btnRow);
     return block;
   }
 
   function renderMiniKeyboardsForQuestion(q) {
-    const fb = $(`${q.id}-feedback`);
-    if (!fb) return;
-
-    fb.innerHTML = "";
-    fb.classList.remove("hidden");
-
-    const row = document.createElement("div");
-    row.className = "qFeedbackRow";
+    const fb = $(`${q.id}-feedback`); if (!fb) return;
+    fb.innerHTML = ""; fb.classList.remove("hidden");
+    const row = document.createElement("div"); row.className = "qFeedbackRow";
 
     const miniStartPitch = pitchFromPcOct(0, MINI_KBD_START_OCT);
-    const correctPitches = triadRootPositionPitches(q.rootPc, q.quality, 4);
-
+    const correctPitches = triadRootPositionPitches(q.rootPc, q.quality, MINI_KBD_START_OCT);
     const correctPcs = q.correctPcs.slice();
     const answeredPcs = q.userPcs.slice();
 
-    const answeredPitches =
-      state.inputMode === INPUT_MODE.KEYBOARD && (q.selectedPitches || []).length
-        ? (q.selectedPitches || []).slice().sort((a, b) => a - b)
-        : answeredRootPositionPitches(q.userPcs, 4);
+    const answeredPitches = state.inputMode === INPUT_MODE.KEYBOARD && (q.selectedPitches || []).length
+      ? (q.selectedPitches || []).slice().sort((a, b) => a - b)
+      : answeredRootPositionPitches(q.userPcs, MINI_KBD_START_OCT);
 
     const answeredMap = new Map();
     if (state.inputMode === INPUT_MODE.KEYBOARD) {
-      // Mark exactly the pitches the user selected (single instance per key).
       for (const p of answeredPitches) {
         const pc = pcFromPitch(p);
         answeredMap.set(p, correctPcs.includes(pc) ? "ok" : "bad");
       }
     } else {
       for (let i = 0; i < answeredPcs.length; i++) {
-        const pc = answeredPcs[i];
-        if (pc == null) continue;
-        const pitch = answeredPitches[i] ?? null;
-        if (pitch == null) continue;
+        const pc = answeredPcs[i]; if (pc == null) continue;
+        const pitch = answeredPitches[i] ?? null; if (pitch == null) continue;
         answeredMap.set(pitch, correctPcs.includes(pc) ? "ok" : "bad");
       }
     }
@@ -1060,371 +752,154 @@ height: outerH,
     const correctMap = new Map();
     for (const p of correctPitches) correctMap.set(p, "ok");
 
-    const answeredMountId = `${q.id}-mini-answered`;
-    const correctMountId = `${q.id}-mini-correct`;
+    const answeredMountId = `${q.id}-mini-answered`; const correctMountId = `${q.id}-mini-correct`;
 
     const answeredBlock = makeMiniKeyboardBlock({
-      title: "Your answered notes",
-      mountId: answeredMountId,
-      btnText: "Play Answered Notes",
-      onPlay: async () => {
-        const toPlay = answeredPitches.length ? answeredPitches : correctPitches;
-        await playPitchesWindowed(toPlay, 1.6);
-      },
+      title: "Your answered notes", mountId: answeredMountId, btnText: "Play Answered Notes",
+      onPlay: async () => { const toPlay = answeredPitches.length ? answeredPitches : correctPitches; await playPitchesWindowed(toPlay, 1.6); },
     });
-
     const correctBlock = makeMiniKeyboardBlock({
-      title: "Correct notes",
-      mountId: correctMountId,
-      btnText: "Play Correct Notes",
-      onPlay: async () => {
-        await playPitchesWindowed(correctPitches, 1.6);
-      },
+      title: "Correct notes", mountId: correctMountId, btnText: "Play Correct Notes",
+      onPlay: async () => { await playPitchesWindowed(correctPitches, 1.6); },
     });
 
-    row.appendChild(answeredBlock);
-    row.appendChild(correctBlock);
-    fb.appendChild(row);
+    row.appendChild(answeredBlock); row.appendChild(correctBlock); fb.appendChild(row);
 
     const chosenText = answeredPcs.map((pc) => (pc == null ? "—" : noteLabelForPc(pc))).join(", ");
     const correctText = pcsToPretty(correctPcs);
-
-    const line = document.createElement("div");
-    line.className = "qAnswerLine";
-
+    const line = document.createElement("div"); line.className = "qAnswerLine";
     const okClass = q.marks === 3 ? "ok" : q.marks === 0 ? "bad" : "";
-    line.innerHTML = `
-      <span class="${okClass}">
-        Marks: <strong>${q.marks} / 3</strong>
-      </span>
-      <br>
-      You chose: <strong>${chosenText}</strong>
-      <br>
-      Correct: <strong>${correctText}</strong>
-    `;
+
+    line.innerHTML = `<span class="${okClass}">Marks: <strong>${q.marks} / 3</strong></span><br>You chose: <strong>${chosenText}</strong><br>Correct: <strong>${correctText}</strong>`;
 
     if (state.inputMode === INPUT_MODE.KEYBOARD && q.selectedPitches?.length === 3 && q.octaveError) {
-      const warn = document.createElement("div");
-      warn.className = "qAnswerLine bad";
+      const warn = document.createElement("div"); warn.className = "qAnswerLine bad";
       warn.textContent = "Note: for full marks the chord must fit within a single octave (root position).";
       fb.appendChild(warn);
     }
-
     fb.appendChild(line);
 
-    const answeredMount = $(answeredMountId);
-    const correctMount = $(correctMountId);
-
+    const answeredMount = $(answeredMountId); const correctMount = $(correctMountId);
     if (answeredMount) {
       answeredMount.innerHTML = "";
-      answeredMount.appendChild(
-        buildKeyboardSvg({
-          startPitch: miniStartPitch,
-          octaves: MINI_KBD_OCTAVES,
-          includeEndC: MINI_KBD_INCLUDE_END_C,
-          widthPx: 520,
-          heightPx: 120,
-          interactive: false,
-          ariaLabel: "Answered notes keyboard",
-          highlight: answeredMap,
-        })
-      );
+      answeredMount.appendChild(buildKeyboardSvg({ startPitch: miniStartPitch, octaves: MINI_KBD_OCTAVES, includeEndC: MINI_KBD_INCLUDE_END_C, widthPx: 520, heightPx: 120, interactive: false, ariaLabel: "Answered notes keyboard", highlight: answeredMap }));
     }
-
     if (correctMount) {
       correctMount.innerHTML = "";
-      correctMount.appendChild(
-        buildKeyboardSvg({
-          startPitch: miniStartPitch,
-          octaves: MINI_KBD_OCTAVES,
-          includeEndC: MINI_KBD_INCLUDE_END_C,
-          widthPx: 520,
-          heightPx: 120,
-          interactive: false,
-          ariaLabel: "Correct notes keyboard",
-          highlight: correctMap,
-        })
-      );
+      correctMount.appendChild(buildKeyboardSvg({ startPitch: miniStartPitch, octaves: MINI_KBD_OCTAVES, includeEndC: MINI_KBD_INCLUDE_END_C, widthPx: 520, heightPx: 120, interactive: false, ariaLabel: "Correct notes keyboard", highlight: correctMap }));
     }
   }
 
-  // -------------------- Marking --------------------
   function markAll() {
-    state.submitted = true;
-
-    setSelectDisabledAll(true);
-    submitBtn.disabled = true;
-    inputModeBtn.disabled = true;
-
-    let total = 0;
-    const max = state.questions.length * 3;
+    state.submitted = true; setSelectDisabledAll(true); submitBtn.disabled = true; inputModeBtn.disabled = true;
+    let total = 0; const max = state.questions.length * 3;
 
     for (const q of state.questions) {
       if (state.inputMode === INPUT_MODE.KEYBOARD) updateQuestionFromSelectedPitches(q);
-
-      const correct = q.correctPcs;
-      const user = q.userPcs;
-
+      const correct = q.correctPcs; const user = q.userPcs;
       let marks = 0;
-      for (let i = 0; i < 3; i++) {
-        if (user[i] != null && user[i] === correct[i]) marks += 1;
-      }
-
-      if (state.inputMode === INPUT_MODE.KEYBOARD && q.selectedPitches?.length === 3 && q.octaveError) {
-        marks = 0;
-      }
-
-      q.marks = marks;
-      total += marks;
-
-      const marksEl = $(`${q.id}-marks`);
-      if (marksEl) marksEl.textContent = `${marks} / 3`;
-
+      for (let i = 0; i < 3; i++) { if (user[i] != null && user[i] === correct[i]) marks += 1; }
+      if (state.inputMode === INPUT_MODE.KEYBOARD && q.selectedPitches?.length === 3 && q.octaveError) marks = 0;
+      q.marks = marks; total += marks;
+      const marksEl = $(`${q.id}-marks`); if (marksEl) marksEl.textContent = `${marks} / 3`;
       renderMiniKeyboardsForQuestion(q);
-
       if (state.inputMode === INPUT_MODE.KEYBOARD) {
-        const actions = $(`${q.id}-kbd-actions`);
-        if (actions) actions.remove();
+        const actions = $(`${q.id}-kbd-actions`); if (actions) actions.remove();
+        const mount = $(`${q.id}-kbd-mount`); if (mount) mount.remove();
       }
     }
 
-    resultsSummary.innerHTML = `
-      Total: <strong>${total} / ${max}</strong>
-      <br>
-      Percentage: <strong>${Math.round((total / max) * 1000) / 10}%</strong>
-    `;
-    resultsPanel.classList.remove("hidden");
-
-    downloadScorecardBtn.disabled = false;
-
-    // In keyboard mode, hide the answering keyboard + its action buttons during the results phase.
-    if (state.inputMode === INPUT_MODE.KEYBOARD) {
-      state.questions.forEach((q) => {
-        const actions = $(`${q.id}-kbd-actions`);
-        if (actions) actions.remove();
-
-        const mount = $(`${q.id}-kbd-mount`);
-        if (mount) mount.remove();
-      });
-    }
-
+    resultsSummary.innerHTML = `Total: <strong>${total} / ${max}</strong><br>Percentage: <strong>${Math.round((total / max) * 1000) / 10}%</strong>`;
+    resultsPanel.classList.remove("hidden"); downloadScorecardBtn.disabled = false;
     window.__triadsSendHeight?.();
   }
 
-  function validateBeforeSubmit() {
-    return true;
-  }
-
-  // -------------------- PDF helpers --------------------
   function addCanvasToPdfPageCentered({ canvas, pdf, marginPt }) {
-    const pageW = pdf.internal.pageSize.getWidth();
-    const pageH = pdf.internal.pageSize.getHeight();
-
-    const usableW = pageW - marginPt * 2;
-    const usableH = pageH - marginPt * 2;
-
+    const pageW = pdf.internal.pageSize.getWidth(); const pageH = pdf.internal.pageSize.getHeight();
+    const usableW = pageW - marginPt * 2; const usableH = pageH - marginPt * 2;
     const scale = Math.min(usableW / canvas.width, usableH / canvas.height);
-    const drawW = canvas.width * scale;
-    const drawH = canvas.height * scale;
-
-    const x = (pageW - drawW) / 2;
-    const y = (pageH - drawH) / 2;
-
-    const imgData = canvas.toDataURL("image/png");
-    pdf.addImage(imgData, "PNG", x, y, drawW, drawH);
+    const drawW = canvas.width * scale; const drawH = canvas.height * scale;
+    pdf.addImage(canvas.toDataURL("image/png"), "PNG", (pageW - drawW) / 2, (pageH - drawH) / 2, drawW, drawH);
   }
 
   async function renderHtmlPagesToPdf({ hostEl, pages, filename }) {
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-
-    hostEl.innerHTML = "";
-    hostEl.classList.remove("hidden");
-
+    const { jsPDF } = window.jspdf; const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    hostEl.innerHTML = ""; hostEl.classList.remove("hidden");
     for (let i = 0; i < pages.length; i++) {
-      hostEl.innerHTML = "";
-      hostEl.appendChild(pages[i]);
-
+      hostEl.innerHTML = ""; hostEl.appendChild(pages[i]);
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-      const canvas = await window.html2canvas(hostEl, {
-        scale: 2,
-        backgroundColor: "#ffffff",
-        useCORS: true,
-      });
-
+      const canvas = await window.html2canvas(hostEl, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
       if (i > 0) pdf.addPage("a4", "portrait");
       addCanvasToPdfPageCentered({ canvas, pdf, marginPt: PDF_MARGIN_PT });
     }
-
-    pdf.save(filename);
-
-    hostEl.classList.add("hidden");
-    hostEl.innerHTML = "";
+    pdf.save(filename); hostEl.classList.add("hidden"); hostEl.innerHTML = "";
   }
 
-  // -------------------- Task sheet PDF (2 columns, keyboards, no split across pages) --------------------
-
-  // -------------------- Task sheet PDF (mode-dependent layout) --------------------
   function buildTaskSheetPages() {
-    const loadedAt = state.createdOnText ? `Created On: ${state.createdOnText}` : "";
     const totalQ = state.questions.length;
+    const limit = state.inputMode === INPUT_MODE.KEYBOARD ? TASK_Q_PER_PAGE_KBD : TASK_Q_PER_PAGE_DROPDOWN;
+    const chunks = chunkArray(state.questions, limit);
 
-    // Dropdown mode: match legacy "lines" layout (script2/style2/html2)
-    if (state.inputMode === INPUT_MODE.DROPDOWN) {
-      const chunks = chunkArray(state.questions, TASK_Q_PER_PAGE_DROPDOWN);
+    return chunks.map((chunk, pageIndex) => {
+      const page = document.createElement("div"); 
+      page.className = "printPage";
+      page.style.position = "relative";
 
-      return chunks.map((chunk, pageIndex) => {
-        const page = document.createElement("div");
-        page.className = "printPage";
+      const titleImg = document.createElement("img"); titleImg.className = "sheetTitleImage"; titleImg.src = "images/titledownload.png"; titleImg.alt = "Root Position Triads";
+      const title = document.createElement("div"); title.className = "sheetTitle"; title.textContent = "Name: .........................................        Date: ...................";
+      const list = document.createElement("ol"); list.className = "sheetList";
 
-        const title = document.createElement("div");
-        title.className = "sheetTitle";
-        title.textContent = "Root Position Triads — Task Sheet";
-
-        const meta = document.createElement("div");
-        meta.className = "sheetMeta";
-        meta.textContent = `${loadedAt ? loadedAt + " • " : ""}${totalQ} questions • Page ${pageIndex + 1} / ${chunks.length}`;
-
-        const list = document.createElement("ol");
-        list.className = "sheetList";
-
+      if (state.inputMode === INPUT_MODE.DROPDOWN) {
         chunk.forEach((q, localIdx) => {
-          const number = pageIndex * TASK_Q_PER_PAGE_DROPDOWN + localIdx + 1;
-
-          const item = document.createElement("li");
-          item.className = "sheetQ";
-
-          const qname = document.createElement("div");
-          qname.className = "sheetQName";
-          qname.textContent = `${number}. ${chordName(q.rootPc, q.quality)}`;
-
-          const row = document.createElement("div");
-          row.className = "sheetLineRow";
-
+          const item = document.createElement("li"); item.className = "sheetQ";
+          const qname = document.createElement("div"); qname.className = "sheetQName"; qname.textContent = `${pageIndex * limit + localIdx + 1}. ${chordName(q.rootPc, q.quality)}`;
+          const row = document.createElement("div"); row.className = "sheetLineRow";
           const labels = ["1st (root)", "3rd", "5th"];
           for (const lab of labels) {
-            const box = document.createElement("div");
-            box.className = "sheetLine";
+            const box = document.createElement("div"); box.className = "sheetLine";
             box.innerHTML = `<span>${lab}:</span> <span class="dots">............................</span>`;
             row.appendChild(box);
           }
-
-          item.appendChild(qname);
-          item.appendChild(row);
-          list.appendChild(item);
+          item.appendChild(qname); item.appendChild(row); list.appendChild(item);
         });
+      } else {
+        const printStartPitch = pitchFromPcOct(0, TASK_KBD_START_OCT);
+        chunk.forEach((q, localIdx) => {
+          const item = document.createElement("li"); item.className = "sheetQ";
+          const qname = document.createElement("div"); qname.className = "sheetQName"; qname.textContent = `${pageIndex * limit + localIdx + 1}. ${chordName(q.rootPc, q.quality)}`;
+          const kbdBox = document.createElement("div"); kbdBox.className = "sheetKbd";
+          const mount = document.createElement("div"); mount.className = "mount";
+          mount.appendChild(buildKeyboardSvg({
+            startPitch: printStartPitch, octaves: TASK_KBD_OCTAVES, includeEndC: TASK_KBD_INCLUDE_END_C,
+            widthPx: 700, heightPx: 150, interactive: false, ariaLabel: "Printable keyboard",
+            theme: { frameFill: "#fff", whiteFill: "#fff", whiteStroke: "#000", blackFill: "#fff", blackStroke: "#000" }
+          }));
+          kbdBox.appendChild(mount); item.appendChild(qname); item.appendChild(kbdBox); list.appendChild(item);
+        });
+      }
 
-        const titleImg = document.createElement("img");
-titleImg.className = "sheetTitleImage";
-titleImg.src = "images/titledownload.png";
-titleImg.alt = "Root Position Triads";
+      page.appendChild(titleImg); page.appendChild(title); 
+      const hint = document.createElement("div"); hint.className = "sheetHint"; 
+      hint.textContent = state.inputMode === INPUT_MODE.KEYBOARD ? "Colour in / mark the 3 notes of the correct chord on the keyboards for each question." : "Write the correct notes on the dotted lines for each question.";
+      page.appendChild(hint); 
+      page.appendChild(list); 
 
-page.appendChild(titleImg);
-page.appendChild(title);
-page.appendChild(meta);
-        page.appendChild(list);
-        return page;
-      });
-    }
+      const footer = document.createElement("div");
+      footer.style.cssText = "position: absolute; bottom: 0px; left: 0; right: 0; text-align: center; font-size: 12px; opacity: 0.8;";
+      footer.textContent = `${totalQ} questions • Page ${pageIndex + 1} / ${chunks.length}`;
+      page.appendChild(footer);
 
-    // Keyboard mode: printable keyboards (colourable black keys)
-    const chunks = chunkArray(state.questions, TASK_Q_PER_PAGE_KBD);
-    const printStartPitch = pitchFromPcOct(0, TASK_KBD_START_OCT);
-
-    return chunks.map((chunk, pageIndex) => {
-      const page = document.createElement("div");
-      page.className = "printPage";
-
-      const titleImg = document.createElement("img");
-      titleImg.className = "sheetTitleImage";
-      titleImg.src = "images/titledownload.png";
-      titleImg.alt = "Root Position Triads";
-
-      const title = document.createElement("div");
-      title.className = "sheetTitle";
-      title.textContent = "Root Position Triads — Task Sheet";
-
-      const meta = document.createElement("div");
-      meta.className = "sheetMeta";
-      meta.textContent = `${loadedAt ? loadedAt + " • " : ""}${totalQ} questions • Page ${pageIndex + 1} / ${chunks.length}`;
-
-      const list = document.createElement("ol");
-      list.className = "sheetList";
-
-      chunk.forEach((q, localIdx) => {
-        const number = pageIndex * TASK_Q_PER_PAGE_KBD + localIdx + 1;
-
-        const item = document.createElement("li");
-        item.className = "sheetQ";
-
-        const qname = document.createElement("div");
-        qname.className = "sheetQName";
-        qname.textContent = `${number}. ${chordName(q.rootPc, q.quality)}`;
-
-        const kbdBox = document.createElement("div");
-        kbdBox.className = "sheetKbd";
-
-        const mount = document.createElement("div");
-        mount.className = "mount";
-
-        mount.appendChild(
-          buildKeyboardSvg({
-            startPitch: printStartPitch,
-            octaves: TASK_KBD_OCTAVES,
-            includeEndC: TASK_KBD_INCLUDE_END_C,
-            widthPx: 700,
-            heightPx: 150,
-            interactive: false,
-            ariaLabel: "Printable keyboard",
-            theme: {
-              frameFill: "#fff",
-              whiteFill: "#fff",
-              whiteStroke: "#000",
-              blackFill: "#fff",
-              blackStroke: "#000",
-            },
-          })
-        );
-
-        kbdBox.appendChild(mount);
-
-        item.appendChild(qname);
-        item.appendChild(kbdBox);
-        list.appendChild(item);
-      });
-
-      page.appendChild(titleImg);
-      page.appendChild(title);
-      page.appendChild(meta);
-
-      const hint = document.createElement("div");
-      hint.className = "sheetHint";
-      hint.textContent = "Colour in / mark one instance of the chord on the keyboards for each question.";
-      page.appendChild(hint);
-
-      page.appendChild(list);
       return page;
     });
   }
 
-
   async function downloadTaskSheetPdf() {
     if (!state.started || !state.questions.length) return;
-
-    const pages = buildTaskSheetPages();
     const fileStamp = new Date().toISOString().slice(0, 10);
-    await renderHtmlPagesToPdf({
-      hostEl: taskSheetTemplate,
-      pages,
-      filename: `Triads Task Sheet (${fileStamp}).pdf`,
-    });
+    await renderHtmlPagesToPdf({ hostEl: taskSheetTemplate, pages: buildTaskSheetPages(), filename: `Triads Task Sheet (${fileStamp}).pdf` });
   }
 
-  // -------------------- Scorecard PDF (unchanged layout, 24 per page) --------------------
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
-  }
+  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c])); }
 
   function buildScorecardPages(playerName, total, max) {
     const loadedAt = state.createdOnText ? `Created On: ${state.createdOnText}` : "";
@@ -1432,47 +907,24 @@ page.appendChild(meta);
     const chunks = chunkArray(state.questions, 24);
 
     return chunks.map((chunk, pageIndex) => {
-      const page = document.createElement("div");
-      page.className = "printPage";
-
-      const titleImg = document.createElement("img");
-      titleImg.className = "sheetTitleImage";
-      titleImg.src = "images/titledownload.png";
-      titleImg.alt = "Root Position Triads";
-
-      const title = document.createElement("div");
-      title.className = "sheetTitle";
-      title.textContent = "Root Position Triads — Scorecard";
-
-      const meta = document.createElement("div");
-      meta.className = "sheetMeta";
-      meta.textContent = `${loadedAt ? loadedAt + " • " : ""}${totalQ} questions • Page ${pageIndex + 1} / ${chunks.length}`;
-
-      page.appendChild(titleImg);
-      page.appendChild(title);
-      page.appendChild(meta);
+      const page = document.createElement("div"); page.className = "printPage";
+      const titleImg = document.createElement("img"); titleImg.className = "sheetTitleImage"; titleImg.src = "images/titledownload.png"; titleImg.alt = "Root Position Triads";
+      const title = document.createElement("div"); title.className = "sheetTitle"; title.textContent = "Root Position Triads — Scorecard";
+      const meta = document.createElement("div"); meta.className = "sheetMeta"; meta.textContent = `${loadedAt ? loadedAt + " • " : ""}${totalQ} questions • Page ${pageIndex + 1} / ${chunks.length}`;
+      page.appendChild(titleImg); page.appendChild(title); page.appendChild(meta);
 
       if (pageIndex === 0) {
-        const top = document.createElement("div");
-        top.className = "sheetQ";
-        top.innerHTML = `
-          <div class="sheetQName">Name: ${escapeHtml(playerName)}</div>
-          <div style="font-weight:900;">
-            Score: ${total} / ${max} (${Math.round((total / max) * 1000) / 10}%)
-          </div>
-        `;
+        const top = document.createElement("div"); top.className = "sheetQ";
+        top.style.marginBottom = "10px";
+        top.innerHTML = `<div class="sheetQName">Name: ${escapeHtml(playerName)}</div><div style="font-weight:900;">Score: ${total} / ${max} (${Math.round((total / max) * 1000) / 10}%)</div>`;
         page.appendChild(top);
       }
 
-      const list = document.createElement("ol");
-      list.className = "sheetList";
-
+      const list = document.createElement("ol"); list.className = "sheetList";
       const startIdx = pageIndex * 24;
       chunk.forEach((q, localIdx) => {
         const idx = startIdx + localIdx;
-        const item = document.createElement("li");
-        item.className = "sheetQ";
-
+        const item = document.createElement("li"); item.className = "sheetQ";
         const chosen = q.userPcs.map((pc) => (pc == null ? "—" : noteLabelForPc(pc))).join(", ");
         const correct = pcsToPretty(q.correctPcs);
 
@@ -1481,116 +933,53 @@ page.appendChild(meta);
           <div style="font-weight:800; font-size:12px; opacity:.9; line-height:1.45;">
             Your answer: <strong>${escapeHtml(chosen)}</strong><br>
             Correct: <strong>${escapeHtml(correct)}</strong>
-          </div>
-        `;
+          </div>`;
         list.appendChild(item);
       });
-
-      page.appendChild(list);
-      return page;
+      page.appendChild(list); return page;
     });
   }
 
   async function downloadScorecardPdf() {
-    if (!state.submitted) {
-      alert("Submit your answers first, then download the scorecard.");
-      return;
-    }
-
+    if (!state.submitted) { alert("Submit your answers first, then download the scorecard."); return; }
     const prev = localStorage.getItem("triads_player_name") || "";
     const name = (window.prompt("Enter your name for the scorecard:", prev) ?? "").trim();
     const playerName = name || "Player";
     if (name) localStorage.setItem("triads_player_name", name);
-
     const total = state.questions.reduce((a, q) => a + (q.marks || 0), 0);
     const max = state.questions.length * 3;
-
-    const pages = buildScorecardPages(playerName, total, max);
     const fileStamp = new Date().toISOString().slice(0, 10);
-    await renderHtmlPagesToPdf({
-      hostEl: scorecardTemplate,
-      pages,
-      filename: `Triads Scorecard (${playerName}) (${fileStamp}).pdf`,
-    });
+    await renderHtmlPagesToPdf({ hostEl: scorecardTemplate, pages: buildScorecardPages(playerName, total, max), filename: `Triads Scorecard (${playerName}) (${fileStamp}).pdf` });
   }
 
-  // -------------------- Top keyboard init --------------------
   function initTopKeyboard() {
     topKeyboardMount.innerHTML = "";
-
-    const startPitch = pitchFromPcOct(0, KBD_START_OCT);
-    const svg = buildKeyboardSvg({
-      startPitch,
-      octaves: KBD_OCTAVES,
-      widthPx: 1100,
-      heightPx: 220,
-      interactive: true,
-      ariaLabel: "Interactive three-octave keyboard (C3..B5)",
-      onKeyDown: async (pitch, groupEl) => {
-        await resumeAudioIfNeeded();
-        stopAllNotes(0.02);
-
-        await playPitchesWindowed([pitch], 0.9);
-        flashKeyGroup(groupEl, 260);
-      },
-    });
-
-    topKeyboardMount.appendChild(svg);
+    topKeyboardMount.appendChild(buildKeyboardSvg({
+      startPitch: pitchFromPcOct(0, KBD_START_OCT), octaves: KBD_OCTAVES, widthPx: 1100, heightPx: 220, interactive: true, ariaLabel: "Interactive three-octave keyboard (C3..B5)",
+      onKeyDown: async (pitch, groupEl) => { await resumeAudioIfNeeded(); stopAllNotes(0.02); await playPitchesWindowed([pitch], 0.9); flashKeyGroup(groupEl, 260); },
+    }));
   }
 
-  // -------------------- Events --------------------
   function bindEvents() {
     questionCountSelect?.addEventListener("change", updatePageAdvice);
-
-    beginBtn.addEventListener("click", async () => {
-      await resumeAudioIfNeeded();
-      startGame();
-    });
-
-    infoBtn.addEventListener("click", () => infoModal.classList.remove("hidden"));
-    infoOk.addEventListener("click", () => infoModal.classList.add("hidden"));
-    infoModal.addEventListener("click", (e) => {
-      if (e.target === infoModal) infoModal.classList.add("hidden");
-    });
-
+    beginBtn.addEventListener("click", async () => { playUiSound("select1.mp3"); await resumeAudioIfNeeded(); startGame(); });
+    infoBtn.addEventListener("click", () => { playUiSound("select1.mp3"); infoModal.classList.remove("hidden"); });
+    infoOk.addEventListener("click", () => { playUiSound("back1.mp3"); infoModal.classList.add("hidden"); });
+    infoModal.addEventListener("click", (e) => { if (e.target === infoModal) infoModal.classList.add("hidden"); });
     inputModeBtn.addEventListener("click", () => {
       if (!state.started || state.submitted) return;
-
-      state.inputMode =
-        state.inputMode === INPUT_MODE.DROPDOWN ? INPUT_MODE.KEYBOARD : INPUT_MODE.DROPDOWN;
-
-      syncInputModeBtnText();
-      updateKeyboardModeHint();
-      renderQuiz();
+      playUiSound("select1.mp3");
+      state.inputMode = state.inputMode === INPUT_MODE.DROPDOWN ? INPUT_MODE.KEYBOARD : INPUT_MODE.DROPDOWN;
+      syncInputModeBtnText(); updateKeyboardModeHint(); renderQuiz();
     });
-
-    downloadTaskBtn.addEventListener("click", downloadTaskSheetPdf);
-    downloadScorecardBtn.addEventListener("click", downloadScorecardPdf);
-
-    submitBtn.addEventListener("click", () => {
-      if (!state.started || state.submitted) return;
-      if (!validateBeforeSubmit()) return;
-      markAll();
-    });
-
-    resetBtn.addEventListener("click", resetGameToInitial);
-    resetBtn2.addEventListener("click", resetGameToInitial);
-
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        if (!infoModal.classList.contains("hidden")) infoModal.classList.add("hidden");
-      }
-    });
+    downloadTaskBtn.addEventListener("click", () => { playUiSound("select1.mp3"); downloadTaskSheetPdf(); });
+    downloadScorecardBtn.addEventListener("click", () => { playUiSound("select1.mp3"); downloadScorecardPdf(); });
+    submitBtn.addEventListener("click", () => { if (!state.started || state.submitted) return; markAll(); });
+    resetBtn.addEventListener("click", () => { playUiSound("select1.mp3"); resetGameToInitial(); });
+    resetBtn2.addEventListener("click", () => { playUiSound("select1.mp3"); resetGameToInitial(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !infoModal.classList.contains("hidden")) infoModal.classList.add("hidden"); });
   }
 
-  // -------------------- Init --------------------
-  function init() {
-    setupIframeAutoHeight();
-    initTopKeyboard();
-    bindEvents();
-    updatePageAdvice();
-    resetGameToInitial();
-  }
-
+  function init() { setupIframeAutoHeight(); initTopKeyboard(); bindEvents(); updatePageAdvice(); resetGameToInitial(); }
   init();
 })();
